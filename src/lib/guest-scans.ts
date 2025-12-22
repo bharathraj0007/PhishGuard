@@ -42,7 +42,7 @@ export function getGuestScans(): PhishingScan[] {
       analysis: String((s as any).analysis ?? ''),
       createdAt: String((s as any).createdAt ?? getNowIso()),
     }))
-    .filter((s) => ['link', 'email', 'sms', 'qr'].includes(s.scanType))
+    .filter((s) => ['url', 'link', 'email', 'sms', 'qr'].includes(s.scanType))
 }
 
 export function setGuestScans(scans: PhishingScan[]) {
@@ -90,11 +90,11 @@ export function computeGuestAnalytics(scans: PhishingScan[]): UserAnalyticsRespo
     dangerous: 0,
   }
   const scanTypeCounts = {
-    link: 0,
+    url: 0,
     email: 0,
     sms: 0,
     qr: 0,
-  }
+  } as Record<string, number>
 
   let totalConfidence = 0
 

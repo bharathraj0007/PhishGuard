@@ -1,4 +1,4 @@
-import { Shield, Menu, X } from 'lucide-react'
+import { Shield, Menu, X, LogIn, UserPlus, LogOut, LayoutDashboard, ShieldCheck } from 'lucide-react'
 import { Button } from './ui/button'
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -7,36 +7,27 @@ import { blink } from '../lib/blink'
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
 
   useEffect(() => {
     const unsubscribe = blink.auth.onAuthStateChanged((state) => {
       setUser(state.user)
-      setIsAdmin(state.user?.role === 'admin')
+      setIsLoading(state.isLoading)
     })
     return unsubscribe
   }, [])
 
-  const handleAuthClick = async () => {
-    if (user) {
-      await blink.auth.signOut()
-      navigate('/')
-    } else {
-      // Only admins should access login
-      navigate('/admin-login')
-    }
-  }
-
-  const handleGetStarted = () => {
-    // Guest mode: no sign-in required
-    navigate('/dashboard')
+  const handleSignOut = async () => {
+    await blink.auth.signOut()
+    navigate('/')
   }
 
   const isHomePage = location.pathname === '/'
   const isDashboard = location.pathname === '/dashboard'
-  const isAdminDashboard = location.pathname === '/admin'
+  const isLoginPage = location.pathname === '/login'
+  const isSignupPage = location.pathname === '/signup'
 
   return (
     <nav className="border-b border-primary/30 glass-card sticky top-0 z-50 shadow-[0_0_30px_hsl(var(--primary)/0.3)]">
@@ -59,7 +50,7 @@ export function Navbar() {
             >
               /Home/
             </button>
-            {!isDashboard && !isAdminDashboard && (
+            {!isDashboard && (
               <>
                 <button 
                   onClick={() => navigate('/about')} 
@@ -86,28 +77,48 @@ export function Navbar() {
                 /Dashboard/
               </span>
             )}
-            {isAdminDashboard && (
-              <span className="text-sm font-display font-bold uppercase tracking-wide text-primary neon-glow">
-                /Admin Dashboard/
-              </span>
-            )}
-            {isAdmin && !isAdminDashboard && (
-              <button 
-                onClick={() => navigate('/admin')} 
-                className="text-sm font-display font-bold uppercase tracking-wide hover:text-primary transition-all duration-300 hover:scale-105 neon-glow"
-              >
-                /Admin/
-              </button>
-            )}
-            {isAdmin && (
-              <Button onClick={handleAuthClick} variant="ghost" size="sm">
-                {user ? 'Logout' : 'Admin Login'}
-              </Button>
-            )}
-            {!isDashboard && !isAdminDashboard && (
-              <Button onClick={handleGetStarted} variant="matrix" size="sm">
-                Get Started
-              </Button>
+            
+            {/* Auth buttons */}
+            {!isLoading && (
+              <>
+                {user ? (
+                  // Logged in: show Dashboard, Admin (if admin), and Sign Out
+                  <div className="flex items-center gap-3">
+                    {!isDashboard && (
+                      <Button onClick={() => navigate('/dashboard')} variant="glass" size="sm">
+                        <LayoutDashboard className="w-4 h-4 mr-2" />
+                        Dashboard
+                      </Button>
+                    )}
+                    {user.role === 'admin' && (
+                      <Button onClick={() => navigate('/admin')} variant="ghost" size="sm">
+                        <ShieldCheck className="w-4 h-4 mr-2" />
+                        Admin
+                      </Button>
+                    )}
+                    <Button onClick={handleSignOut} variant="ghost" size="sm">
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sign Out
+                    </Button>
+                  </div>
+                ) : (
+                  // Not logged in: show Login and Sign Up
+                  <div className="flex items-center gap-3">
+                    {!isLoginPage && (
+                      <Button onClick={() => navigate('/login')} variant="ghost" size="sm">
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Login
+                      </Button>
+                    )}
+                    {!isSignupPage && (
+                      <Button onClick={() => navigate('/signup')} variant="matrix" size="sm">
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Sign Up
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -132,7 +143,7 @@ export function Navbar() {
             >
               /Home/
             </button>
-            {!isDashboard && !isAdminDashboard && (
+            {!isDashboard && (
               <>
                 <button
                   onClick={() => {
@@ -168,32 +179,73 @@ export function Navbar() {
                 /Dashboard/
               </div>
             )}
-            {isAdminDashboard && (
-              <div className="text-sm font-display font-bold uppercase tracking-wide text-primary py-3 neon-glow">
-                /Admin Dashboard/
-              </div>
-            )}
-            {isAdmin && !isAdminDashboard && (
-              <button
-                onClick={() => {
-                  navigate('/admin')
-                  setMobileMenuOpen(false)
-                }}
-                className="block w-full text-left text-sm font-display font-bold uppercase tracking-wide hover:text-primary transition-all duration-300 py-3 neon-glow"
-              >
-                /Admin/
-              </button>
-            )}
-            {isAdmin && (
-              <Button onClick={handleAuthClick} variant="ghost" className="w-full">
-                {user ? 'Logout' : 'Admin Login'}
-              </Button>
-            )}
-            {!isDashboard && !isAdminDashboard && (
-              <Button onClick={handleGetStarted} variant="matrix" className="w-full">
-                Get Started
-              </Button>
-            )}
+            
+            {/* Mobile Auth buttons */}
+            <div className="pt-4 border-t border-primary/30 space-y-3">
+              {!isLoading && (
+                <>
+                  {user ? (
+                    // Logged in: show Dashboard and Sign Out
+                    <>
+                      {!isDashboard && (
+                        <Button 
+                          onClick={() => {
+                            navigate('/dashboard')
+                            setMobileMenuOpen(false)
+                          }} 
+                          variant="glass" 
+                          className="w-full"
+                        >
+                          <LayoutDashboard className="w-4 h-4 mr-2" />
+                          Dashboard
+                        </Button>
+                      )}
+                      <Button 
+                        onClick={() => {
+                          handleSignOut()
+                          setMobileMenuOpen(false)
+                        }} 
+                        variant="ghost" 
+                        className="w-full"
+                      >
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Sign Out
+                      </Button>
+                    </>
+                  ) : (
+                    // Not logged in: show Login and Sign Up
+                    <>
+                      {!isLoginPage && (
+                        <Button 
+                          onClick={() => {
+                            navigate('/login')
+                            setMobileMenuOpen(false)
+                          }} 
+                          variant="ghost" 
+                          className="w-full"
+                        >
+                          <LogIn className="w-4 h-4 mr-2" />
+                          Login
+                        </Button>
+                      )}
+                      {!isSignupPage && (
+                        <Button 
+                          onClick={() => {
+                            navigate('/signup')
+                            setMobileMenuOpen(false)
+                          }} 
+                          variant="matrix" 
+                          className="w-full"
+                        >
+                          <UserPlus className="w-4 h-4 mr-2" />
+                          Sign Up
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

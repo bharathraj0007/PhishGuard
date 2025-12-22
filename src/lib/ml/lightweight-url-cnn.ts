@@ -241,22 +241,63 @@ export class LightweightURLCNN {
 
   /**
    * Predict phishing probability for a single URL
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predict(url: string): Promise<URLPrediction> {
     if (!this.isInitialized || !this.model) {
       throw new Error('Model not trained. Call train() first.');
     }
 
-    const indices = this.urlToIndices(url);
-    const input = tf.tensor2d([indices], [1, this.config.maxLength], 'int32');
+    // Run prediction with automatic tensor cleanup
+    const probability = await tf.tidy(async () => {
+      const indices = this.urlToIndices(url);
+      const input = tf.tensor2d([indices], [1, this.config.maxLength], 'int32');
 
-    try {
-      const prediction = this.model.predict(input) as tf.Tensor;
-      const probability = (await prediction.data())[0];
+      const prediction = this.model!.predict(input) as tf.Tensor;
+      const probData = await prediction.data();
+      
+      // Extract probability before tf.tidy disposes tensors
+      return probData[0];
+    });
 
-      prediction.dispose();
+    // Analyze suspicious patterns
+    const suspiciousPatterns = this.analyzeSuspiciousPatterns(url);
+    const riskScore = this.calculateRiskScore(url, probability);
 
-      // Analyze suspicious patterns
+    return {
+      isPhishing: probability > 0.5,
+      confidence: Math.abs(probability - 0.5) * 2,
+      probability: probability,
+      features: {
+        suspiciousPatterns,
+        riskScore
+      }
+    };
+  }
+
+  /**
+   * Batch prediction for multiple URLs
+   * Uses tf.tidy() for automatic tensor memory management
+   */
+  async predictBatch(urls: string[]): Promise<URLPrediction[]> {
+    if (!this.isInitialized || !this.model) {
+      throw new Error('Model not trained. Call train() first.');
+    }
+
+    // Run batch prediction with automatic tensor cleanup
+    const probabilities = await tf.tidy(async () => {
+      const sequences = urls.map(url => this.urlToIndices(url));
+      const input = tf.tensor2d(sequences, [urls.length, this.config.maxLength], 'int32');
+
+      const predictions = this.model!.predict(input) as tf.Tensor;
+      const probs = await predictions.data();
+
+      // Return copy before tf.tidy disposes tensors
+      return Array.from(probs);
+    });
+
+    return urls.map((url, idx) => {
+      const probability = probabilities[idx];
       const suspiciousPatterns = this.analyzeSuspiciousPatterns(url);
       const riskScore = this.calculateRiskScore(url, probability);
 
@@ -269,46 +310,7 @@ export class LightweightURLCNN {
           riskScore
         }
       };
-    } finally {
-      input.dispose();
-    }
-  }
-
-  /**
-   * Batch prediction for multiple URLs
-   */
-  async predictBatch(urls: string[]): Promise<URLPrediction[]> {
-    if (!this.isInitialized || !this.model) {
-      throw new Error('Model not trained. Call train() first.');
-    }
-
-    const sequences = urls.map(url => this.urlToIndices(url));
-    const input = tf.tensor2d(sequences, [urls.length, this.config.maxLength], 'int32');
-
-    try {
-      const predictions = this.model.predict(input) as tf.Tensor;
-      const probabilities = await predictions.data();
-
-      predictions.dispose();
-
-      return urls.map((url, idx) => {
-        const probability = probabilities[idx];
-        const suspiciousPatterns = this.analyzeSuspiciousPatterns(url);
-        const riskScore = this.calculateRiskScore(url, probability);
-
-        return {
-          isPhishing: probability > 0.5,
-          confidence: Math.abs(probability - 0.5) * 2,
-          probability: probability,
-          features: {
-            suspiciousPatterns,
-            riskScore
-          }
-        };
-      });
-    } finally {
-      input.dispose();
-    }
+    });
   }
 
   /**

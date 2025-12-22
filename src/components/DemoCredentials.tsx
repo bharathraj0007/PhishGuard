@@ -22,25 +22,18 @@ export function DemoCredentials({ onUseDemo }: DemoCredentialsProps) {
   // Demo credentials for support/testing
   const demoCredentials = [
     {
-      name: 'Support Demo',
-      email: 'demo@phishguard.com',
-      password: 'DemoPass123!@',
-      role: 'Support Agent',
-      description: 'For testing and support purposes'
-    },
-    {
       name: 'Admin Demo',
       email: 'admin@phishguard.com',
-      password: 'AdminPass123!@',
+      password: 'AdminPass123!@#',
       role: 'Administrator',
-      description: 'Full access for demonstration'
+      description: 'Full admin access - manage users, datasets, models, and system settings'
     },
     {
       name: 'User Demo',
-      email: 'user@phishguard.com',
-      password: 'UserPass123!@',
+      email: 'demo@phishguard.com',
+      password: 'DemoPass123!@',
       role: 'Standard User',
-      description: 'Regular user account for testing'
+      description: 'Regular user account for testing phishing detection features'
     }
   ]
 

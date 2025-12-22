@@ -4,7 +4,7 @@ import { Badge } from './ui/badge'
 import { blink } from '../lib/blink'
 import { clearGuestScans, getGuestScans, onGuestScansUpdated } from '../lib/guest-scans'
 import { History as HistoryIcon, Link, Mail, MessageSquare, QrCode, Loader2, Trash2 } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow } from '../lib/date-utils'
 import type { PhishingScan } from '../types'
 import { Button } from './ui/button'
 import { getUserScans } from '../lib/phishing-detector'
@@ -51,6 +51,7 @@ export function History() {
 
   const getScanIcon = (type: string) => {
     switch (type) {
+      case 'url':
       case 'link': return <Link className="w-4 h-4" />
       case 'email': return <Mail className="w-4 h-4" />
       case 'sms': return <MessageSquare className="w-4 h-4" />
@@ -143,7 +144,7 @@ export function History() {
                             </p>
                           </div>
                           <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">
-                            {formatDistanceToNow(new Date(scan.createdAt), { addSuffix: true })}
+                            {formatDistanceToNow(scan.createdAt, { addSuffix: true })}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-sm font-mono">

@@ -357,24 +357,65 @@ export class TFIDFEmailModel {
 
   /**
    * Predict phishing probability for a single email
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predict(email: string): Promise<EmailPrediction> {
     if (!this.isInitialized || !this.model) {
       throw new Error('Model not trained. Call train() first.');
     }
 
-    // Transform email to TF-IDF features
-    const features = this.vectorizer.transform([email]);
-    const input = tf.tensor2d(features);
+    // Run prediction with automatic tensor cleanup
+    const probability = await tf.tidy(async () => {
+      // Transform email to TF-IDF features
+      const features = this.vectorizer.transform([email]);
+      const input = tf.tensor2d(features);
 
-    try {
       // Make prediction
-      const prediction = this.model.predict(input) as tf.Tensor;
-      const probability = (await prediction.data())[0];
+      const prediction = this.model!.predict(input) as tf.Tensor;
+      const probData = await prediction.data();
+      
+      // Extract probability before tf.tidy disposes tensors
+      return probData[0];
+    });
 
-      prediction.dispose();
+    // Analyze suspicious words
+    const suspiciousWords = this.analyzeSuspiciousWords(email);
+    const riskScore = this.calculateRiskScore(email, probability);
 
-      // Analyze suspicious words
+    return {
+      isPhishing: probability > 0.5,
+      confidence: Math.abs(probability - 0.5) * 2,
+      probability: probability,
+      features: {
+        suspiciousWords,
+        riskScore
+      }
+    };
+  }
+
+  /**
+   * Batch prediction for multiple emails
+   * Uses tf.tidy() for automatic tensor memory management
+   */
+  async predictBatch(emails: string[]): Promise<EmailPrediction[]> {
+    if (!this.isInitialized || !this.model) {
+      throw new Error('Model not trained. Call train() first.');
+    }
+
+    // Run batch prediction with automatic tensor cleanup
+    const probabilities = await tf.tidy(async () => {
+      const features = this.vectorizer.transform(emails);
+      const input = tf.tensor2d(features);
+
+      const predictions = this.model!.predict(input) as tf.Tensor;
+      const probs = await predictions.data();
+
+      // Return copy before tf.tidy disposes tensors
+      return Array.from(probs);
+    });
+
+    return emails.map((email, idx) => {
+      const probability = probabilities[idx];
       const suspiciousWords = this.analyzeSuspiciousWords(email);
       const riskScore = this.calculateRiskScore(email, probability);
 
@@ -387,46 +428,7 @@ export class TFIDFEmailModel {
           riskScore
         }
       };
-    } finally {
-      input.dispose();
-    }
-  }
-
-  /**
-   * Batch prediction for multiple emails
-   */
-  async predictBatch(emails: string[]): Promise<EmailPrediction[]> {
-    if (!this.isInitialized || !this.model) {
-      throw new Error('Model not trained. Call train() first.');
-    }
-
-    const features = this.vectorizer.transform(emails);
-    const input = tf.tensor2d(features);
-
-    try {
-      const predictions = this.model.predict(input) as tf.Tensor;
-      const probabilities = await predictions.data();
-
-      predictions.dispose();
-
-      return emails.map((email, idx) => {
-        const probability = probabilities[idx];
-        const suspiciousWords = this.analyzeSuspiciousWords(email);
-        const riskScore = this.calculateRiskScore(email, probability);
-
-        return {
-          isPhishing: probability > 0.5,
-          confidence: Math.abs(probability - 0.5) * 2,
-          probability: probability,
-          features: {
-            suspiciousWords,
-            riskScore
-          }
-        };
-      });
-    } finally {
-      input.dispose();
-    }
+    });
   }
 
   /**

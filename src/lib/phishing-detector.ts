@@ -1,19 +1,78 @@
 import { blink } from './blink'
 import type { ScanType, ScanResult } from '../types'
 import { getQRPhishingService } from './ml/qr-phishing-service'
+import { autoTrainingService } from './ml/auto-training-service'
+import { UnifiedMLService } from './ml/unified-ml-service'
+
+/**
+ * Calculate confidence score based on threat level and risk score
+ * - SAFE: confidence = (100 - riskScore) normalized to 85-99%
+ * - SUSPICIOUS: confidence = 60-80% based on risk score
+ * - DANGEROUS: confidence = 85-99% based on risk score
+ */
+function calculateConfidence(threatLevel: 'safe' | 'suspicious' | 'dangerous', riskScore: number): number {
+  let confidence: number
+  
+  if (threatLevel === 'safe') {
+    // For safe content, low risk = high confidence
+    // riskScore 0-29 maps to confidence 85-99%
+    const safetyScore = 100 - riskScore
+    confidence = Math.round(85 + (safetyScore / 100) * 14)
+  } else if (threatLevel === 'suspicious') {
+    // For suspicious content, moderate confidence (60-80%)
+    // riskScore 30-49 maps to confidence 60-80%
+    const normalizedRisk = (riskScore - 30) / 20
+    confidence = Math.round(60 + normalizedRisk * 20)
+  } else {
+    // For dangerous content, high confidence (85-99%)
+    // riskScore 50-100 maps to confidence 85-99%
+    const normalizedRisk = Math.min((riskScore - 50) / 50, 1)
+    confidence = Math.round(85 + normalizedRisk * 14)
+  }
+  
+  // Ensure confidence is within valid range (60-99)
+  return Math.max(60, Math.min(99, confidence))
+}
 
 /**
  * Analyze content for phishing threats.
  *
- * NOTE: We intentionally keep scanning client-side (no network dependency) so URL/SMS/Email scans
- * always work even if edge deployments are unavailable.
+ * Strategy:
+ * 1. Auto-train ML models on first scan (silent, non-intrusive)
+ * 2. Use ML models for prediction if available
+ * 3. Fall back to heuristic analysis if ML fails or not ready
  */
 export async function analyzeContent(content: string, scanType: ScanType): Promise<ScanResult> {
   const trimmed = content.trim()
   if (!trimmed) throw new Error('Content is required')
 
+  // Auto-train model if needed (non-blocking, transparent to user)
+  try {
+    await autoTrainingService.ensureModelTrained(scanType)
+  } catch (error) {
+    console.warn(`Auto-training warning for ${scanType}:`, error)
+    // Continue with fallback heuristics if training fails
+  }
+
+  // Try ML prediction first
+  try {
+    const mlService = new UnifiedMLService()
+    const mlResult = await mlService.predict(trimmed, scanType)
+    
+    return {
+      threatLevel: mlResult.threatLevel,
+      confidence: mlResult.confidence,
+      indicators: mlResult.indicators,
+      analysis: mlResult.analysis,
+      recommendations: mlResult.recommendations,
+    }
+  } catch (mlError) {
+    console.warn(`ML prediction failed for ${scanType}, falling back to heuristics:`, mlError)
+  }
+
+  // Fall back to heuristic analysis
   switch (scanType) {
-    case 'link':
+    case 'url':
       return analyzeURLLocal(trimmed)
     case 'email':
       return analyzeEmailLocal(trimmed)
@@ -73,7 +132,7 @@ function analyzeURLLocal(url: string): ScanResult {
   }
 
   const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
-  const confidence = Math.min(riskScore, 100)
+  const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
@@ -88,8 +147,8 @@ function analyzeURLLocal(url: string): ScanResult {
     }`,
     recommendations:
       threatLevel === 'dangerous'
-        ? ['Do not click this link', 'Report to the sender or security team', 'Verify with the official website directly']
-        : ['Exercise caution', 'Verify sender identity', 'Check for typosquatting in the domain'],
+        ? ['❌ Do not click this link', '📧 Report to the sender or security team', '🛡️ Verify with the official website directly']
+        : ['✓ Exercise caution', '⚠️ Verify sender identity', '🔍 Check for typosquatting in the domain'],
   }
 }
 
@@ -139,7 +198,7 @@ function analyzeEmailLocal(content: string): ScanResult {
   }
 
   const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
-  const confidence = Math.min(riskScore, 100)
+  const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
@@ -154,8 +213,8 @@ function analyzeEmailLocal(content: string): ScanResult {
     }`,
     recommendations:
       threatLevel === 'dangerous'
-        ? ['Do not click links or open attachments', 'Contact the sender via official channels', 'Delete the email if unsure']
-        : ['Email appears safe', 'Verify important requests independently', 'Check the sender address carefully'],
+        ? ['❌ Do not click links or open attachments', '📧 Contact the sender via official channels', '🗑️ Delete the email if unsure']
+        : ['✓ Email appears safe', '⚠️ Verify important requests independently', '🔍 Check the sender address carefully'],
   }
 }
 
@@ -205,12 +264,12 @@ function analyzeSMSLocal(smsContent: string): ScanResult {
   }
 
   const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
-  const confidence = Math.min(riskScore, 100)
+  const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
     confidence,
-    indicators: indicators.length ? indicators : ['No obvious phishing patterns'],
+    indicators: indicators.length ? indicators : ['✓ No obvious phishing patterns'],
     analysis: `SMS pattern analysis (Confidence: ${confidence}%). ${
       threatLevel === 'dangerous'
         ? 'High phishing probability detected.'
@@ -220,8 +279,8 @@ function analyzeSMSLocal(smsContent: string): ScanResult {
     }`,
     recommendations:
       threatLevel === 'dangerous'
-        ? ['Do not click links', 'Contact the organization directly', 'Delete the message immediately']
-        : ['SMS appears safe', 'Still verify important requests', 'Be cautious of unexpected messages'],
+        ? ['❌ Do not click links', '📞 Contact the organization directly', '🗑️ Delete the message immediately']
+        : ['✓ SMS appears safe', '⚠️ Still verify important requests', '🔍 Be cautious of unexpected messages'],
   }
 }
 
@@ -276,7 +335,7 @@ async function analyzeQRLocal(content: string): Promise<ScanResult> {
     }
 
     const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
-    const confidence = Math.min(riskScore, 100)
+    const confidence = calculateConfidence(threatLevel, riskScore)
 
     return {
       threatLevel,
@@ -285,8 +344,8 @@ async function analyzeQRLocal(content: string): Promise<ScanResult> {
       analysis: `QR URL analysis (Confidence: ${confidence}%). Decoded content: ${content}.`,
       recommendations:
         threatLevel === 'dangerous'
-          ? ['Do not scan this QR code', 'Report suspicious QR codes', 'Verify destination first']
-          : ['QR appears safe', 'Still verify destination', 'Be cautious with unexpected QR codes'],
+          ? ['❌ Do not scan this QR code', '⚠️ Report suspicious QR codes', '🔍 Verify destination first']
+          : ['✓ QR appears safe', '⚠️ Still verify destination', '🔍 Be cautious with unexpected QR codes'],
     }
   }
 }
@@ -298,6 +357,7 @@ export async function saveScan(
   result: ScanResult
 ): Promise<void> {
   const scanId = `scan_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  const now = new Date().toISOString()
 
   await blink.db.phishingScans.create({
     id: scanId,
@@ -308,7 +368,8 @@ export async function saveScan(
     confidence: result.confidence,
     indicators: JSON.stringify(result.indicators),
     analysis: result.analysis,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   })
 }
 

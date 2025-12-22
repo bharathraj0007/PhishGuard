@@ -14,6 +14,7 @@ import {
   textToCharSequence,
   cleanText
 } from './text-preprocessing';
+import { safeInference } from './tf-backend-manager';
 
 export interface PredictionResult {
   isPhishing: boolean;
@@ -80,6 +81,7 @@ export class MLPredictionService {
 
   /**
    * Predict phishing for given content
+   * Uses tf.tidy() to safely manage tensor memory
    */
   async predict(
     content: string,
@@ -98,16 +100,18 @@ export class MLPredictionService {
 
       const model = this.models.get(scanType)!;
 
-      // Preprocess input based on scan type
-      const inputTensor = this.preprocessInput(content, scanType);
+      // Run prediction with automatic tensor cleanup
+      const score = await tf.tidy(async () => {
+        // Preprocess input based on scan type
+        const inputTensor = this.preprocessInput(content, scanType);
 
-      // Run prediction
-      const prediction = model.predict(inputTensor) as tf.Tensor;
-      const score = (await prediction.data())[0];
-
-      // Clean up tensors
-      inputTensor.dispose();
-      prediction.dispose();
+        // Run prediction
+        const prediction = model.predict(inputTensor) as tf.Tensor;
+        const scoreData = await prediction.data();
+        
+        // Extract score before tensors are disposed by tf.tidy
+        return scoreData[0];
+      });
 
       const processingTime = Date.now() - startTime;
 

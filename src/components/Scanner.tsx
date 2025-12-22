@@ -12,12 +12,13 @@ import { blink } from '../lib/blink'
 import { addGuestScan } from '../lib/guest-scans'
 import { analyzeContent, saveScan } from '../lib/phishing-detector'
 import { getQRPhishingService } from '../lib/ml/qr-phishing-service'
+import { scanContentML, fileToBase64 } from '../lib/api-client'
 import { toast } from 'sonner'
 
 export function Scanner() {
-  const [activeTab, setActiveTab] = useState<ScanType>('link')
+  const [activeTab, setActiveTab] = useState<ScanType>('url')
   const [contentsByType, setContentsByType] = useState<Record<ScanType, string>>({
-    link: '',
+    url: '',
     email: '',
     sms: '',
     qr: '',
@@ -28,7 +29,7 @@ export function Scanner() {
   }
   const [isScanning, setIsScanning] = useState(false)
   const [resultsByType, setResultsByType] = useState<Record<ScanType, ScanResult | null>>({
-    link: null,
+    url: null,
     email: null,
     sms: null,
     qr: null,
@@ -58,15 +59,35 @@ export function Scanner() {
     setResultsByType((prev) => ({ ...prev, [activeTab]: null }))
 
     try {
-      // Optional: if an admin/user is logged in, we can still persist scans server-side.
       const user = await blink.auth.me().catch(() => null)
 
-      const scanResult = await analyzeContent(content, activeTab)
+      // Use backend ML API for inference
+      let scanResult: ScanResult
+      
+      try {
+        // Try backend ML API first (server-side inference)
+        scanResult = await scanContentML({
+          content,
+          scanType: activeTab,
+          userId: user?.id,
+          saveToHistory: !!user, // Save to DB if user is logged in
+        })
+        
+        console.log('✅ Used backend ML inference')
+      } catch (mlError) {
+        console.warn('Backend ML API failed, falling back to client-side analysis:', mlError)
+        // Fall back to client-side analysis if backend fails
+        scanResult = await analyzeContent(content, activeTab)
+        
+        // Save manually if backend didn't save
+        if (user) {
+          await saveScan(user.id, activeTab, content, scanResult)
+        }
+      }
+
       setResultsByType((prev) => ({ ...prev, [activeTab]: scanResult }))
 
-      if (user) {
-        await saveScan(user.id, activeTab, content, scanResult)
-      } else {
+      if (!user) {
         // Guest mode: store local scan history in this browser
         addGuestScan({ scanType: activeTab, content, result: scanResult })
       }
@@ -91,41 +112,78 @@ export function Scanner() {
     setDecodedURL(null)
 
     try {
-      const qrService = getQRPhishingService()
-      const analysis = await qrService.analyzeQRImage(qrImageFile)
-
-      if (!analysis.decodedURL) {
-        toast.error('Failed to decode QR code. Please ensure the image contains a valid QR code and try again.')
-        console.error('QR decode failed - analysis:', analysis)
-        setIsScanning(false)
-        return
-      }
-
-      setDecodedURL(analysis.decodedURL)
-
-      // Convert QR analysis to ScanResult format
-      const scanResult: ScanResult = {
-        threatLevel: analysis.isPhishing ? 'dangerous' : 'safe',
-        confidence: Math.round(analysis.confidence * 100),
-        indicators: analysis.indicators,
-        analysis: `QR Code decoded to: ${analysis.decodedURL}\n\nRisk Score: ${analysis.riskScore}/100\nThreat Level: ${analysis.threatLevel.toUpperCase()}\n\n${analysis.urlAnalysis ? `URL Analysis:\n- Domain Score: ${analysis.urlAnalysis.details.domainScore}/100\n- Path Score: ${analysis.urlAnalysis.details.pathScore}/100\n- Parameter Score: ${analysis.urlAnalysis.details.parameterScore}/100` : 'No URL analysis available'}`,
-        recommendations: analysis.isPhishing 
-          ? ['Do not scan or click the QR code', 'Report the QR code to security team', 'Delete the image if suspicious']
-          : ['QR code appears safe', 'Verify the destination before visiting']
-      }
-
-      setResultsByType((prev) => ({ ...prev, qr: scanResult }))
-
-      // Save to history if authenticated
       const user = await blink.auth.me().catch(() => null)
 
-      if (user) {
-        await saveScan(user.id, 'qr', analysis.decodedURL, scanResult)
-      } else {
-        addGuestScan({ scanType: 'qr', content: analysis.decodedURL, result: scanResult })
-      }
+      // Try backend ML API first for QR scanning
+      try {
+        // Convert file to base64
+        const imageBase64 = await fileToBase64(qrImageFile)
+        
+        // Use backend ML API for QR decoding and analysis
+        const scanResult = await scanContentML({
+          imageData: imageBase64,
+          scanType: 'qr',
+          userId: user?.id,
+          saveToHistory: !!user,
+        })
 
-      toast.success('QR code analyzed successfully')
+        // Extract decoded URL from analysis if available
+        const urlMatch = scanResult.analysis.match(/QR code decoded to: ([^\n]+)/i)
+        const decodedURLFromBackend = urlMatch ? urlMatch[1] : null
+        
+        if (decodedURLFromBackend) {
+          setDecodedURL(decodedURLFromBackend)
+        }
+
+        setResultsByType((prev) => ({ ...prev, qr: scanResult }))
+
+        if (!user) {
+          addGuestScan({ 
+            scanType: 'qr', 
+            content: decodedURLFromBackend || 'QR Code', 
+            result: scanResult 
+          })
+        }
+
+        toast.success('QR code analyzed successfully')
+        console.log('✅ Used backend ML QR inference')
+      } catch (backendError) {
+        console.warn('Backend QR API failed, falling back to client-side:', backendError)
+        
+        // Fall back to client-side QR analysis
+        const qrService = getQRPhishingService()
+        const analysis = await qrService.analyzeQRImage(qrImageFile)
+
+        if (!analysis.decodedURL) {
+          toast.error('Failed to decode QR code. Please ensure the image contains a valid QR code and try again.')
+          console.error('QR decode failed - analysis:', analysis)
+          setIsScanning(false)
+          return
+        }
+
+        setDecodedURL(analysis.decodedURL)
+
+        // Convert QR analysis to ScanResult format
+        const scanResult: ScanResult = {
+          threatLevel: analysis.isPhishing ? 'dangerous' : 'safe',
+          confidence: Math.round(analysis.confidence * 100),
+          indicators: analysis.indicators,
+          analysis: `QR Code decoded to: ${analysis.decodedURL}\n\nRisk Score: ${analysis.riskScore}/100\nThreat Level: ${analysis.threatLevel.toUpperCase()}\n\n${analysis.urlAnalysis ? `URL Analysis:\n- Domain Score: ${analysis.urlAnalysis.details.domainScore}/100\n- Path Score: ${analysis.urlAnalysis.details.pathScore}/100\n- Parameter Score: ${analysis.urlAnalysis.details.parameterScore}/100` : 'No URL analysis available'}`,
+          recommendations: analysis.isPhishing 
+            ? ['Do not scan or click the QR code', 'Report the QR code to security team', 'Delete the image if suspicious']
+            : ['QR code appears safe', 'Verify the destination before visiting']
+        }
+
+        setResultsByType((prev) => ({ ...prev, qr: scanResult }))
+
+        if (user) {
+          await saveScan(user.id, 'qr', analysis.decodedURL, scanResult)
+        } else {
+          addGuestScan({ scanType: 'qr', content: analysis.decodedURL, result: scanResult })
+        }
+
+        toast.success('QR code analyzed successfully')
+      }
     } catch (error) {
       toast.error('Failed to analyze QR code. Please try again.')
       console.error(error)
@@ -225,7 +283,7 @@ export function Scanner() {
           <CardContent>
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScanType)}>
               <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="link">
+                <TabsTrigger value="url">
                   <Link className="w-4 h-4 mr-2" />
                   <span className="hidden sm:inline">URL</span>
                 </TabsTrigger>
@@ -243,7 +301,7 @@ export function Scanner() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="link" className="space-y-4 mt-6">
+              <TabsContent value="url" className="space-y-4 mt-6">
                 <div>
                   <label className="text-sm font-medium mb-2 block">Enter URL to scan</label>
                   <Input

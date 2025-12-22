@@ -1,10 +1,12 @@
 /**
  * ML Prediction Service for PhishGuard
  * 
- * Provides real-time phishing detection using the trained TensorFlow.js model
+ * Provides real-time phishing detection using the trained TensorFlow.js model.
+ * Updated for browser stability with safe backend initialization.
  */
 
 import { UnifiedUSEPhishingModel } from './unified-use-model';
+import { initializeForInference, ensureBackendReady, getBackendStatus } from './tf-backend-manager';
  
  export interface ScanResult {
    threatLevel: 'safe' | 'low' | 'medium' | 'high' | 'critical';
@@ -22,32 +24,38 @@ import { UnifiedUSEPhishingModel } from './unified-use-model';
    private initializationPromise: Promise<void> | null = null;
  
    /**
-    * Initialize the ML model for predictions
-    */
-   async initialize(): Promise<void> {
-     if (this.isInitialized) return;
+     * Initialize the ML model for predictions
+     */
+    async initialize(): Promise<void> {
+      if (this.isInitialized) return;
     
-     if (this.initializationPromise) {
-       return this.initializationPromise;
-     }
- 
-     this.initializationPromise = (async () => {
-       try {
-         console.log('🤖 Initializing Unified USE Phishing Model...');
- 
-         this.model = new UnifiedUSEPhishingModel();
-         await this.model.initialize();
- 
-         this.isInitialized = true;
-         console.log('✅ Unified ML model ready (Email + SMS + URL + QR text)');
-       } catch (error) {
-         console.error('❌ Failed to initialize ML model:', error);
-         throw error;
-       }
-     })();
- 
-     return this.initializationPromise;
-   }
+      if (this.initializationPromise) {
+        return this.initializationPromise;
+      }
+   
+      this.initializationPromise = (async () => {
+        try {
+          console.log('🤖 Initializing ML prediction service...');
+          
+          // Initialize TF backend for inference (WebGL with CPU fallback)
+          await initializeForInference();
+          
+          const status = getBackendStatus();
+          console.log(`📊 TF Backend: ${status.currentBackend} (CPU mode: ${status.isCPUMode})`);
+   
+          this.model = new UnifiedUSEPhishingModel();
+          await this.model.initialize();
+   
+          this.isInitialized = true;
+          console.log('✅ Unified ML model ready (Email + SMS + URL + QR text)');
+        } catch (error) {
+          console.error('❌ Failed to initialize ML model:', error);
+          throw error;
+        }
+      })();
+   
+      return this.initializationPromise;
+    }
  
    /**
     * Analyze email/text for phishing using ML model
@@ -59,8 +67,11 @@ import { UnifiedUSEPhishingModel } from './unified-use-model';
        console.log('⚠️ Model not initialized, using rule-based detection');
        return this.ruleBasedAnalysis(text, scanType);
      }
- 
+   
      try {
+       // Ensure backend is ready (handles WebGL context recovery)
+       await ensureBackendReady();
+       
        const pred = await this.model!.predict(text);
  
        const threatLevel: ScanResult['threatLevel'] = pred.probability < 0.2

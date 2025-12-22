@@ -1,6 +1,6 @@
 /**
  * Real-time Synchronization Service
- * Handles bidirectional sync between admin and client sides
+ * Handles data synchronization and event processing
  */
 
 import { blink } from './blink';

@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Alert, AlertDescription } from './ui/alert'
+import { Button } from './ui/button'
 import { getUserAnalytics, type UserAnalyticsResponse } from '../lib/api'
 import { blink } from '../lib/blink'
 import { computeGuestAnalytics, getGuestScans, onGuestScansUpdated } from '../lib/guest-scans'
-import { Activity, Loader2, TrendingUp, Shield, AlertTriangle, CheckCircle2, BarChart3 } from 'lucide-react'
+import { Activity, Loader2, TrendingUp, Shield, AlertTriangle, CheckCircle2, BarChart3, RefreshCw } from 'lucide-react'
 import { Badge } from './ui/badge'
 
 export function AnalyticsDashboard() {
   const [analytics, setAnalytics] = useState<UserAnalyticsResponse['analytics'] | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
@@ -47,6 +49,14 @@ export function AnalyticsDashboard() {
     }
   }
 
+  const handleRefresh = async () => {
+    if (user) {
+      setRefreshing(true)
+      await loadAnalytics(user.id)
+      setRefreshing(false)
+    }
+  }
+
 
   if (loading) {
     return (
@@ -60,7 +70,7 @@ export function AnalyticsDashboard() {
     )
   }
 
-  if (!analytics || analytics.totalScans === 0) {
+  if (!analytics) {
     return (
       <section className="py-16 px-4">
         <div className="container mx-auto max-w-6xl">
@@ -68,7 +78,25 @@ export function AnalyticsDashboard() {
             <CardContent className="py-16 text-center">
               <BarChart3 className="w-16 h-16 text-primary/50 mx-auto mb-4" />
               <p className="text-muted-foreground font-mono">
-                No analytics data available. Execute scans to populate dashboard.
+                Failed to load analytics. Please try again later.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    )
+  }
+
+  // Display empty state only if truly no scans (totalScans is 0)
+  if (analytics.totalScans === 0) {
+    return (
+      <section className="py-16 px-4">
+        <div className="container mx-auto max-w-6xl">
+          <Card className="glass-card border-2 border-primary/30 shadow-[0_0_40px_hsl(var(--primary)/0.3)]">
+            <CardContent className="py-16 text-center">
+              <BarChart3 className="w-16 h-16 text-primary/50 mx-auto mb-4" />
+              <p className="text-muted-foreground font-mono">
+                No scans yet. Execute some scans to see analytics here.
               </p>
             </CardContent>
           </Card>
@@ -81,21 +109,35 @@ export function AnalyticsDashboard() {
     <section className="py-16 px-4">
       <div className="container mx-auto max-w-6xl space-y-8">
         {/* Header */}
-        <div>
-          <h2 className="text-3xl font-display uppercase tracking-wider neon-glow mb-2">
-            /Security Analytics/
-          </h2>
-          <p className="text-muted-foreground font-mono">
-            <span className="text-primary">{'>'}</span> Real-time threat detection statistics
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <h2 className="text-3xl font-display uppercase tracking-wider neon-glow mb-2">
+              /Security Analytics/
+            </h2>
+            <p className="text-muted-foreground font-mono">
+              <span className="text-primary">{'>'}</span> Real-time threat detection statistics
+            </p>
 
-          {!user && (
-            <Alert className="mt-4 glass-card border border-primary/30">
-              <Activity className="w-4 h-4 text-primary" />
-              <AlertDescription className="font-mono text-xs">
-                <span className="text-primary">{'>'}</span> Guest mode: analytics are based on scans saved in this browser.
-              </AlertDescription>
-            </Alert>
+            {!user && (
+              <Alert className="mt-4 glass-card border border-primary/30">
+                <Activity className="w-4 h-4 text-primary" />
+                <AlertDescription className="font-mono text-xs">
+                  <span className="text-primary">{'>'}</span> Guest mode: analytics are based on scans saved in this browser.
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+          
+          {user && (
+            <Button 
+              onClick={handleRefresh} 
+              disabled={refreshing}
+              size="sm"
+              variant="outline"
+              className="mt-1"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
           )}
         </div>
 

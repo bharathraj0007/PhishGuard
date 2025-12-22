@@ -2,14 +2,25 @@ import { Hero } from '../components/Hero'
 import { Stats } from '../components/Stats'
 import { Features } from '../components/Features'
 import { Button } from '../components/ui/button'
-import { Shield, Lock, Zap, Users } from 'lucide-react'
+import { Shield, Lock, Zap, Users, UserPlus, LogIn, LayoutDashboard } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { blink } from '../lib/blink'
 
 export function HomePage() {
   const navigate = useNavigate()
+  const [user, setUser] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const unsubscribe = blink.auth.onAuthStateChanged((state) => {
+      setUser(state.user)
+      setIsLoading(state.isLoading)
+    })
+    return unsubscribe
+  }, [])
 
   const handleGetStarted = () => {
-    // Guest mode: no sign-in required
     navigate('/dashboard')
   }
 
@@ -102,9 +113,27 @@ export function HomePage() {
               &gt; Join thousands protecting themselves from phishing attacks
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button onClick={() => navigate('/about')} size="lg" variant="glass" className="text-lg">
-                Learn More
-              </Button>
+              {!isLoading && (
+                <>
+                  {user ? (
+                    <Button onClick={() => navigate('/dashboard')} size="lg" variant="matrix" className="text-lg">
+                      <LayoutDashboard className="w-5 h-5 mr-2" />
+                      Go to Dashboard
+                    </Button>
+                  ) : (
+                    <>
+                      <Button onClick={() => navigate('/signup')} size="lg" variant="matrix" className="text-lg">
+                        <UserPlus className="w-5 h-5 mr-2" />
+                        Create Free Account
+                      </Button>
+                      <Button onClick={() => navigate('/login')} size="lg" variant="glass" className="text-lg">
+                        <LogIn className="w-5 h-5 mr-2" />
+                        Sign In
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
               <Button onClick={() => navigate('/documentation')} size="lg" variant="glass" className="text-lg">
                 View Docs
               </Button>

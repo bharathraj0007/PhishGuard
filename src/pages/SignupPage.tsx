@@ -53,17 +53,8 @@ export function SignupPage() {
         return
       }
 
-      // Get user info to check role
-      const user = await blink.auth.me()
-      
       toast.success('Account created successfully!')
-      
-      // Redirect based on user role
-      if (user?.role === 'admin') {
-        navigate('/admin')
-      } else {
-        navigate('/dashboard')
-      }
+      navigate('/dashboard')
     } catch (error: any) {
       console.error('Sign up error:', error)
       

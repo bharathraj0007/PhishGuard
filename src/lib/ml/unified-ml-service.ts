@@ -72,7 +72,7 @@ export class UnifiedMLService {
           return await this.predictEmail(content);
         case 'sms':
           return await this.predictSMS(content);
-        case 'link':
+        case 'url':
           return await this.predictURL(content);
         case 'qr':
           return await this.predictQR(content);
@@ -143,11 +143,15 @@ export class UnifiedMLService {
   private formatEmailResult(prediction: EmailPrediction): MLPredictionResult {
     const threatLevel = this.calculateThreatLevel(prediction.probability);
     
+    // Filter out undefined/null values to prevent runtime errors
+    const suspiciousWords = (prediction.features.suspiciousWords || [])
+      .filter((w): w is string => typeof w === 'string' && w.length > 0);
+    
     return {
       isPhishing: prediction.isPhishing,
       confidence: Math.round(prediction.confidence * 100),
       threatLevel,
-      indicators: prediction.features.suspiciousWords.map(w => `Suspicious word: ${w}`),
+      indicators: suspiciousWords.map(w => `Suspicious word: ${w}`),
       analysis: this.generateEmailAnalysis(prediction),
       recommendations: this.generateEmailRecommendations(prediction.isPhishing),
       riskScore: prediction.features.riskScore
@@ -160,11 +164,15 @@ export class UnifiedMLService {
   private formatSMSResult(prediction: SMSPrediction): MLPredictionResult {
     const threatLevel = this.calculateThreatLevel(prediction.probability);
     
+    // Filter out undefined/null values to prevent runtime errors
+    const suspiciousTokens = (prediction.features.suspiciousTokens || [])
+      .filter((t): t is string => typeof t === 'string' && t.length > 0);
+    
     return {
       isPhishing: prediction.isPhishing,
       confidence: Math.round(prediction.confidence * 100),
       threatLevel,
-      indicators: prediction.features.suspiciousTokens.map(t => `Suspicious token: ${t}`),
+      indicators: suspiciousTokens.map(t => `Suspicious token: ${t}`),
       analysis: this.generateSMSAnalysis(prediction),
       recommendations: this.generateSMSRecommendations(prediction.isPhishing),
       riskScore: prediction.features.riskScore
@@ -177,11 +185,15 @@ export class UnifiedMLService {
   private formatURLResult(prediction: URLPrediction, url: string): MLPredictionResult {
     const threatLevel = this.calculateThreatLevel(prediction.probability);
     
+    // Filter out undefined/null values to prevent runtime errors
+    const suspiciousPatterns = (prediction.features.suspiciousPatterns || [])
+      .filter((p): p is string => typeof p === 'string' && p.length > 0);
+    
     return {
       isPhishing: prediction.isPhishing,
       confidence: Math.round(prediction.confidence * 100),
       threatLevel,
-      indicators: prediction.features.suspiciousPatterns.map(p => p.replace(/_/g, ' ')),
+      indicators: suspiciousPatterns.map(p => p.replace(/_/g, ' ')),
       analysis: this.generateURLAnalysis(prediction, url),
       recommendations: this.generateURLRecommendations(prediction.isPhishing),
       riskScore: prediction.features.riskScore
@@ -205,13 +217,18 @@ export class UnifiedMLService {
       return 'This email appears to be legitimate based on content analysis. No significant phishing indicators detected.';
     }
 
+    // Safely filter suspicious words
+    const suspiciousWords = (prediction.features.suspiciousWords || [])
+      .filter((w): w is string => typeof w === 'string' && w.length > 0);
+    const wordsDisplay = suspiciousWords.length > 0 ? suspiciousWords.join(', ') : 'various patterns';
+
     if (prediction.probability > 0.8) {
       return `HIGH RISK: This email shows strong phishing characteristics (${Math.round(prediction.probability * 100)}% confidence). ` +
-             `Detected suspicious patterns: ${prediction.features.suspiciousWords.join(', ')}. Do not click links or provide information.`;
+             `Detected suspicious patterns: ${wordsDisplay}. Do not click links or provide information.`;
     }
 
     return `SUSPICIOUS: This email shows some concerning patterns (${Math.round(prediction.probability * 100)}% confidence). ` +
-           `Exercise caution. Detected: ${prediction.features.suspiciousWords.join(', ')}.`;
+           `Exercise caution. Detected: ${wordsDisplay}.`;
   }
 
   /**
@@ -222,13 +239,18 @@ export class UnifiedMLService {
       return 'This SMS appears to be legitimate. No significant phishing indicators detected.';
     }
 
+    // Safely filter suspicious tokens
+    const suspiciousTokens = (prediction.features.suspiciousTokens || [])
+      .filter((t): t is string => typeof t === 'string' && t.length > 0);
+    const tokensDisplay = suspiciousTokens.length > 0 ? suspiciousTokens.join(', ') : 'suspicious patterns';
+
     if (prediction.probability > 0.8) {
       return `HIGH RISK: This SMS shows strong phishing characteristics (${Math.round(prediction.probability * 100)}% confidence). ` +
-             `Contains suspicious elements: ${prediction.features.suspiciousTokens.join(', ')}. Do not click links.`;
+             `Contains suspicious elements: ${tokensDisplay}. Do not click links.`;
     }
 
     return `SUSPICIOUS: This SMS contains some concerning patterns (${Math.round(prediction.probability * 100)}% confidence). ` +
-           `Verify sender before taking action. Found: ${prediction.features.suspiciousTokens.join(', ')}.`;
+           `Verify sender before taking action. Found: ${tokensDisplay}.`;
   }
 
   /**
@@ -239,13 +261,20 @@ export class UnifiedMLService {
       return `This URL appears to be safe (${Math.round((1 - prediction.probability) * 100)}% confidence). No major security concerns detected.`;
     }
 
+    // Safely filter suspicious patterns
+    const suspiciousPatterns = (prediction.features.suspiciousPatterns || [])
+      .filter((p): p is string => typeof p === 'string' && p.length > 0);
+    const patternsDisplay = suspiciousPatterns.length > 0 
+      ? suspiciousPatterns.map(p => p.replace(/_/g, ' ')).join(', ') 
+      : 'suspicious characteristics';
+
     if (prediction.probability > 0.8) {
       return `DANGER: This URL is highly likely to be malicious (${Math.round(prediction.probability * 100)}% confidence). ` +
-             `Detected indicators: ${prediction.features.suspiciousPatterns.map(p => p.replace(/_/g, ' ')).join(', ')}. Do NOT visit this link.`;
+             `Detected indicators: ${patternsDisplay}. Do NOT visit this link.`;
     }
 
     return `WARNING: This URL shows suspicious characteristics (${Math.round(prediction.probability * 100)}% confidence). ` +
-           `Issues found: ${prediction.features.suspiciousPatterns.map(p => p.replace(/_/g, ' ')).join(', ')}. Proceed with extreme caution.`;
+           `Issues found: ${patternsDisplay}. Proceed with extreme caution.`;
   }
 
   /**

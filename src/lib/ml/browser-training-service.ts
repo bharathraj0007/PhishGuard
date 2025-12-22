@@ -19,6 +19,15 @@ import {
   TFIDFVectorizer
 } from './text-preprocessing';
 import { ModelFactory, MODEL_CONFIGS } from './tfjs-models';
+import {
+  ensureBackendReady,
+  initializeForTraining,
+  safeTrainingBlock,
+  disposeTensors,
+  checkMemoryUsage,
+  getSafeTrainingConfig,
+  disposeAllTensors
+} from './tf-backend-manager';
 
 export interface TrainingProgress {
   stage: 'loading' | 'preprocessing' | 'building' | 'training' | 'evaluating' | 'saving' | 'completed' | 'error';
@@ -166,9 +175,9 @@ export class BrowserMLTrainingService {
         message: 'Data prepared for training'
       });
 
-      // Stage 5: Train model
+      // Stage 5: Train model with safe memory management
       const epochs = config.epochs || 10;
-      const batchSize = config.batchSize || 32;
+      const batchSize = config.batchSize || 8; // Reduced from 32 for stability
       const validationSplit = config.validationSplit || 0.1;
 
       this.reportProgress({
@@ -179,46 +188,69 @@ export class BrowserMLTrainingService {
         totalEpochs: epochs
       });
 
-      const history = await tfModel.fit(trainX, trainY, {
-        epochs,
-        batchSize,
-        validationSplit,
-        shuffle: true,
-        callbacks: {
-          onEpochEnd: (epoch, logs) => {
-            const progress = 55 + ((epoch + 1) / epochs) * 30;
-            this.reportProgress({
-              stage: 'training',
-              progress,
-              message: `Epoch ${epoch + 1}/${epochs}`,
-              epoch: epoch + 1,
-              totalEpochs: epochs,
-              loss: logs?.loss,
-              accuracy: logs?.acc
-            });
+      const history = await safeTrainingBlock(async () => {
+        return tfModel.fit(trainX, trainY, {
+          epochs,
+          batchSize,
+          validationSplit,
+          shuffle: true,
+          callbacks: {
+            onEpochEnd: (epoch, logs) => {
+              const progress = 55 + ((epoch + 1) / epochs) * 30;
+              this.reportProgress({
+                stage: 'training',
+                progress,
+                message: `Epoch ${epoch + 1}/${epochs}`,
+                epoch: epoch + 1,
+                totalEpochs: epochs,
+                loss: logs?.loss,
+                accuracy: logs?.acc
+              });
+              
+              // Check memory usage periodically
+              if ((epoch + 1) % 2 === 0) {
+                checkMemoryUsage(256);
+              }
+            }
           }
-        }
+        });
+      }, () => {
+        // Cleanup function
+        disposeAllTensors();
       });
 
-      // Stage 6: Evaluate
+      // Stage 6: Evaluate with tf.tidy() for memory safety
       this.reportProgress({
         stage: 'evaluating',
         progress: 85,
         message: 'Evaluating model on test set...'
       });
 
-      const testEval = tfModel.evaluate(testX, testY) as tf.Scalar[];
-      const testLoss = await testEval[0].data();
-      const testAccuracy = await testEval[1].data();
+      let testLoss = 0;
+      let testAccuracy = 0;
 
-      // Get final training metrics
+      const evalResult = await safeTrainingBlock(async () => {
+        const testEval = tfModel.evaluate(testX, testY) as tf.Scalar[];
+        const loss = await testEval[0].data();
+        const accuracy = await testEval[1].data();
+        
+        // Dispose evaluation tensors immediately
+        disposeTensors(testEval);
+        
+        return { loss: loss[0], accuracy: accuracy[0] };
+      });
+
+      testLoss = evalResult.loss;
+      testAccuracy = evalResult.accuracy;
+
+      // Get final training metrics (safe access to history)
       const trainLoss = history.history.loss[history.history.loss.length - 1] as number;
       const trainAccuracy = history.history.acc[history.history.acc.length - 1] as number;
 
       this.reportProgress({
         stage: 'evaluating',
         progress: 90,
-        message: `Test accuracy: ${(testAccuracy[0] * 100).toFixed(2)}%`
+        message: `Test accuracy: ${(testAccuracy * 100).toFixed(2)}%`
       });
 
       // Stage 7: Save model
@@ -231,12 +263,13 @@ export class BrowserMLTrainingService {
       const modelPath = `indexeddb://phishguard-${config.scanType}-model`;
       await tfModel.save(modelPath);
 
-      // Clean up tensors
-      trainX.dispose();
-      trainY.dispose();
-      testX.dispose();
-      testY.dispose();
-      testEval.forEach(t => t.dispose());
+      // Clean up input tensors with tf.tidy() wrapper
+      tf.tidy(() => {
+        trainX.dispose();
+        trainY.dispose();
+        testX.dispose();
+        testY.dispose();
+      });
 
       const trainingTime = Date.now() - startTime;
 
@@ -316,6 +349,7 @@ export class BrowserMLTrainingService {
 
   /**
    * Prepare character-level data (for URLs)
+   * Tensors are kept alive by being returned - caller must dispose
    */
   private async prepareCharacterData(
     train: ProcessedDataset,
@@ -337,7 +371,8 @@ export class BrowserMLTrainingService {
       textToCharSequence(text, charVocab, maxLength)
     );
 
-    // Create tensors
+    // Create tensors - keep alive for training
+    // Note: caller must dispose these tensors after training
     const trainX = tf.tensor2d(trainSequences);
     const trainY = tf.tensor2d(train.labels, [train.labels.length, 1]);
     const testX = tf.tensor2d(testSequences);

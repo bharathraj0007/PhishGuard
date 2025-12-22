@@ -248,78 +248,79 @@ export class BiLSTMSMSModel {
 
   /**
    * Predict phishing probability for a single SMS
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predictSMS(smsText: string): Promise<SMSPrediction> {
     if (!this.isInitialized || !this.model) {
       throw new Error('Model not trained. Call train() first.')
     }
 
-    // Convert to sequence
-    const sequence = this.textToSequence(smsText)
-    const padded = this.padSequences([sequence], this.maxSequenceLength)[0]
-    const tensor = tf.tensor2d([padded], [1, this.maxSequenceLength], 'int32')
+    // Run prediction with automatic tensor cleanup
+    const phishingProb = await tf.tidy(async () => {
+      // Convert to sequence
+      const sequence = this.textToSequence(smsText)
+      const padded = this.padSequences([sequence], this.maxSequenceLength)[0]
+      const tensor = tf.tensor2d([padded], [1, this.maxSequenceLength], 'int32')
 
-    try {
-      const prediction = this.model.predict(tensor) as tf.Tensor
+      const prediction = this.model!.predict(tensor) as tf.Tensor
       const probability = await prediction.data()
-      const phishingProb = probability[0]
+      
+      // Extract probability before tf.tidy disposes tensors
+      return probability[0]
+    })
 
-      prediction.dispose()
+    // Analyze suspicious tokens
+    const suspiciousTokens = this.findSuspiciousTokens(smsText)
+    const riskScore = this.calculateRiskScore(smsText, phishingProb)
 
-      // Analyze suspicious tokens
-      const suspiciousTokens = this.findSuspiciousTokens(smsText)
-      const riskScore = this.calculateRiskScore(smsText, phishingProb)
-
-      return {
-        isPhishing: phishingProb > 0.5,
-        confidence: Math.abs(phishingProb - 0.5) * 2,
-        probability: phishingProb,
-        features: {
-          suspiciousTokens,
-          riskScore
-        }
+    return {
+      isPhishing: phishingProb > 0.5,
+      confidence: Math.abs(phishingProb - 0.5) * 2,
+      probability: phishingProb,
+      features: {
+        suspiciousTokens,
+        riskScore
       }
-    } finally {
-      tensor.dispose()
     }
   }
 
   /**
    * Batch predict for multiple SMS messages
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predictBatch(smsMessages: string[]): Promise<SMSPrediction[]> {
     if (!this.isInitialized || !this.model) {
       throw new Error('Model not trained. Call train() first.')
     }
 
-    const sequences = smsMessages.map(text => this.textToSequence(text))
-    const padded = this.padSequences(sequences, this.maxSequenceLength)
-    const tensor = tf.tensor2d(padded, [smsMessages.length, this.maxSequenceLength], 'int32')
+    // Run batch prediction with automatic tensor cleanup
+    const probabilities = await tf.tidy(async () => {
+      const sequences = smsMessages.map(text => this.textToSequence(text))
+      const padded = this.padSequences(sequences, this.maxSequenceLength)
+      const tensor = tf.tensor2d(padded, [smsMessages.length, this.maxSequenceLength], 'int32')
 
-    try {
-      const predictions = this.model.predict(tensor) as tf.Tensor
-      const probabilities = await predictions.data()
+      const predictions = this.model!.predict(tensor) as tf.Tensor
+      const probs = await predictions.data()
 
-      predictions.dispose()
+      // Return copy before tf.tidy disposes tensors
+      return Array.from(probs)
+    })
 
-      return smsMessages.map((text, idx) => {
-        const probability = probabilities[idx]
-        const suspiciousTokens = this.findSuspiciousTokens(text)
-        const riskScore = this.calculateRiskScore(text, probability)
+    return smsMessages.map((text, idx) => {
+      const probability = probabilities[idx]
+      const suspiciousTokens = this.findSuspiciousTokens(text)
+      const riskScore = this.calculateRiskScore(text, probability)
 
-        return {
-          isPhishing: probability > 0.5,
-          confidence: Math.abs(probability - 0.5) * 2,
-          probability: probability,
-          features: {
-            suspiciousTokens,
-            riskScore
-          }
+      return {
+        isPhishing: probability > 0.5,
+        confidence: Math.abs(probability - 0.5) * 2,
+        probability: probability,
+        features: {
+          suspiciousTokens,
+          riskScore
         }
-      })
-    } finally {
-      tensor.dispose()
-    }
+      }
+    })
   }
 
   /**

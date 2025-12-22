@@ -3,12 +3,25 @@
  * 
  * Lightweight, browser-compatible ML models for phishing detection.
  * Each model type is optimized for specific content (URL, Email, SMS, QR).
+ * 
+ * IMPORTANT: All models use CPU-safe configurations:
+ * - glorotUniform initializers (avoid orthogonal which can crash WebGL)
+ * - Reduced layer sizes for memory efficiency
+ * - Small batch sizes (8) to prevent GPU memory issues
  */
 
 import * as tf from '@tensorflow/tfjs';
 
 /**
+ * Safe initializer configuration - avoids WebGL shader compilation failures
+ */
+const SAFE_KERNEL_INITIALIZER = 'glorotUniform';
+const SAFE_RECURRENT_INITIALIZER = 'glorotUniform';
+const SAFE_BIAS_INITIALIZER = 'zeros';
+
+/**
  * Simple Feed-Forward Neural Network for URL Detection
+ * Reduced complexity for browser stability
  */
 export class URLDetectionModel {
   private model: tf.Sequential | null = null;
@@ -19,29 +32,31 @@ export class URLDetectionModel {
   }
 
   /**
-   * Build the model architecture
+   * Build the model architecture with safe initializers
    */
   build(): void {
     this.model = tf.sequential({
       layers: [
         tf.layers.dense({
-          units: 64,
+          units: 32, // Reduced from 64
           activation: 'relu',
-          inputShape: [this.inputSize]
+          inputShape: [this.inputSize],
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
-          units: 32,
-          activation: 'relu'
+          units: 16, // Reduced from 32
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.2 }),
         tf.layers.dense({
-          units: 16,
-          activation: 'relu'
-        }),
-        tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -52,7 +67,7 @@ export class URLDetectionModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ URL Detection Model built');
+    console.log('✅ URL Detection Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -62,12 +77,14 @@ export class URLDetectionModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }
 
 /**
  * LSTM Model for Email/SMS Text Detection
+ * CPU-safe with reduced complexity and safe initializers
  */
 export class TextLSTMModel {
   private model: tf.Sequential | null = null;
@@ -76,8 +93,8 @@ export class TextLSTMModel {
   private maxLength: number;
 
   constructor(
-    vocabSize: number = 10000,
-    embeddingDim: number = 32,
+    vocabSize: number = 5000, // Reduced from 10000
+    embeddingDim: number = 16, // Reduced from 32
     maxLength: number = 100
   ) {
     this.vocabSize = vocabSize;
@@ -86,7 +103,7 @@ export class TextLSTMModel {
   }
 
   /**
-   * Build LSTM model
+   * Build LSTM model with safe initializers
    */
   build(): void {
     this.model = tf.sequential({
@@ -94,22 +111,30 @@ export class TextLSTMModel {
         tf.layers.embedding({
           inputDim: this.vocabSize,
           outputDim: this.embeddingDim,
-          inputLength: this.maxLength
+          inputLength: this.maxLength,
+          embeddingsInitializer: SAFE_KERNEL_INITIALIZER
         }),
         tf.layers.lstm({
-          units: 64,
+          units: 32, // Reduced from 64
           returnSequences: false,
           dropout: 0.2,
-          recurrentDropout: 0.2
+          recurrentDropout: 0.0, // Disable recurrent dropout for CPU stability
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          recurrentInitializer: SAFE_RECURRENT_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dense({
-          units: 32,
-          activation: 'relu'
+          units: 16, // Reduced from 32
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -120,7 +145,7 @@ export class TextLSTMModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ Text LSTM Model built');
+    console.log('✅ Text LSTM Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -130,12 +155,14 @@ export class TextLSTMModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }
 
 /**
  * Bidirectional LSTM for enhanced text analysis
+ * CPU-safe with reduced complexity and safe initializers
  */
 export class BiLSTMModel {
   private model: tf.Sequential | null = null;
@@ -144,8 +171,8 @@ export class BiLSTMModel {
   private maxLength: number;
 
   constructor(
-    vocabSize: number = 10000,
-    embeddingDim: number = 32,
+    vocabSize: number = 5000, // Reduced from 10000
+    embeddingDim: number = 16, // Reduced from 32
     maxLength: number = 100
   ) {
     this.vocabSize = vocabSize;
@@ -159,22 +186,30 @@ export class BiLSTMModel {
         tf.layers.embedding({
           inputDim: this.vocabSize,
           outputDim: this.embeddingDim,
-          inputLength: this.maxLength
+          inputLength: this.maxLength,
+          embeddingsInitializer: SAFE_KERNEL_INITIALIZER
         }),
         tf.layers.bidirectional({
           layer: tf.layers.lstm({
-            units: 32,
-            returnSequences: false
+            units: 16, // Reduced from 32
+            returnSequences: false,
+            kernelInitializer: SAFE_KERNEL_INITIALIZER,
+            recurrentInitializer: SAFE_RECURRENT_INITIALIZER,
+            biasInitializer: SAFE_BIAS_INITIALIZER
           }) as tf.RNN
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
           units: 16,
-          activation: 'relu'
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -185,7 +220,7 @@ export class BiLSTMModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ BiLSTM Model built');
+    console.log('✅ BiLSTM Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -195,19 +230,21 @@ export class BiLSTMModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }
 
 /**
  * Character-level CNN for URL analysis
+ * CPU-safe with reduced complexity and safe initializers
  */
 export class CharacterCNNModel {
   private model: tf.Sequential | null = null;
   private vocabSize: number;
   private maxLength: number;
 
-  constructor(vocabSize: number = 70, maxLength: number = 256) {
+  constructor(vocabSize: number = 70, maxLength: number = 128) { // Reduced maxLength from 256
     this.vocabSize = vocabSize;
     this.maxLength = maxLength;
   }
@@ -218,31 +255,40 @@ export class CharacterCNNModel {
         tf.layers.embedding({
           inputDim: this.vocabSize,
           outputDim: 16,
-          inputLength: this.maxLength
+          inputLength: this.maxLength,
+          embeddingsInitializer: SAFE_KERNEL_INITIALIZER
         }),
         tf.layers.conv1d({
-          filters: 32,
+          filters: 16, // Reduced from 32
           kernelSize: 3,
           activation: 'relu',
-          padding: 'same'
+          padding: 'same',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.maxPooling1d({ poolSize: 2 }),
         tf.layers.conv1d({
-          filters: 64,
+          filters: 32, // Reduced from 64
           kernelSize: 3,
           activation: 'relu',
-          padding: 'same'
+          padding: 'same',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.maxPooling1d({ poolSize: 2 }),
         tf.layers.flatten(),
         tf.layers.dense({
-          units: 64,
-          activation: 'relu'
+          units: 32, // Reduced from 64
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -253,7 +299,7 @@ export class CharacterCNNModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ Character CNN Model built');
+    console.log('✅ Character CNN Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -263,19 +309,21 @@ export class CharacterCNNModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }
 
 /**
  * Simple CNN for feature-based classification
+ * CPU-safe with reduced complexity and safe initializers
  */
 export class SimpleCNNModel {
   private model: tf.Sequential | null = null;
   private vocabSize: number;
   private maxLength: number;
 
-  constructor(vocabSize: number = 5000, maxLength: number = 100) {
+  constructor(vocabSize: number = 3000, maxLength: number = 100) { // Reduced vocabSize from 5000
     this.vocabSize = vocabSize;
     this.maxLength = maxLength;
   }
@@ -285,23 +333,30 @@ export class SimpleCNNModel {
       layers: [
         tf.layers.embedding({
           inputDim: this.vocabSize,
-          outputDim: 32,
-          inputLength: this.maxLength
+          outputDim: 16, // Reduced from 32
+          inputLength: this.maxLength,
+          embeddingsInitializer: SAFE_KERNEL_INITIALIZER
         }),
         tf.layers.conv1d({
-          filters: 64,
+          filters: 32, // Reduced from 64
           kernelSize: 5,
-          activation: 'relu'
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.globalMaxPooling1d(),
         tf.layers.dense({
-          units: 32,
-          activation: 'relu'
+          units: 16, // Reduced from 32
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -312,7 +367,7 @@ export class SimpleCNNModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ Simple CNN Model built');
+    console.log('✅ Simple CNN Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -322,12 +377,14 @@ export class SimpleCNNModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }
 
 /**
  * Hybrid CNN-LSTM Model for complex patterns
+ * CPU-safe with reduced complexity and safe initializers
  */
 export class CNNLSTMModel {
   private model: tf.Sequential | null = null;
@@ -336,8 +393,8 @@ export class CNNLSTMModel {
   private maxLength: number;
 
   constructor(
-    vocabSize: number = 10000,
-    embeddingDim: number = 32,
+    vocabSize: number = 5000, // Reduced from 10000
+    embeddingDim: number = 16, // Reduced from 32
     maxLength: number = 100
   ) {
     this.vocabSize = vocabSize;
@@ -351,26 +408,36 @@ export class CNNLSTMModel {
         tf.layers.embedding({
           inputDim: this.vocabSize,
           outputDim: this.embeddingDim,
-          inputLength: this.maxLength
+          inputLength: this.maxLength,
+          embeddingsInitializer: SAFE_KERNEL_INITIALIZER
         }),
         tf.layers.conv1d({
-          filters: 64,
+          filters: 32, // Reduced from 64
           kernelSize: 3,
-          activation: 'relu'
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.maxPooling1d({ poolSize: 2 }),
         tf.layers.lstm({
-          units: 32,
-          returnSequences: false
+          units: 16, // Reduced from 32
+          returnSequences: false,
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          recurrentInitializer: SAFE_RECURRENT_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dense({
           units: 16,
-          activation: 'relu'
+          activation: 'relu',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         }),
         tf.layers.dropout({ rate: 0.3 }),
         tf.layers.dense({
           units: 1,
-          activation: 'sigmoid'
+          activation: 'sigmoid',
+          kernelInitializer: SAFE_KERNEL_INITIALIZER,
+          biasInitializer: SAFE_BIAS_INITIALIZER
         })
       ]
     });
@@ -381,7 +448,7 @@ export class CNNLSTMModel {
       metrics: ['accuracy']
     });
 
-    console.log('✅ CNN-LSTM Hybrid Model built');
+    console.log('✅ CNN-LSTM Hybrid Model built (CPU-safe)');
   }
 
   getModel(): tf.Sequential | null {
@@ -391,6 +458,7 @@ export class CNNLSTMModel {
   dispose(): void {
     if (this.model) {
       this.model.dispose();
+      this.model = null;
     }
   }
 }

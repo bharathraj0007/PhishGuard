@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@blinkdotnew/sdk@0.19.2";
+import { createClient } from "npm:@blinkdotnew/sdk";
 
 // ═══════════════════════════════════════════════════════════════════
 // CORS HELPERS - DO NOT MODIFY
@@ -29,7 +28,7 @@ const blink = createClient({
   projectId: "phishguard-web-phishing-detector-eky2mdxr",
 });
 
-serve(async (req) => {
+async function handler(req: Request): Promise<Response> {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -187,4 +186,6 @@ serve(async (req) => {
       500
     );
   }
-});
+}
+
+Deno.serve(handler);

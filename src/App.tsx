@@ -1,29 +1,18 @@
-import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { Navbar } from './components/Navbar'
+import { ProtectedRoute } from './components/ProtectedRoute'
 import { HomePage } from './pages/HomePage'
 import { AboutPage } from './pages/AboutPage'
 import { DocumentationPage } from './pages/DocumentationPage'
 import { ContactSupportPage } from './pages/ContactSupportPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { InsightsPage } from './pages/InsightsPage'
-import { AdminDashboardPage } from './pages/AdminDashboardPage'
-import { AdminSetupPage } from './pages/AdminSetupPage'
 import { LoginPage } from './pages/LoginPage'
 import { SignupPage } from './pages/SignupPage'
-import { AdminLoginPage } from './pages/AdminLoginPage'
-import { AdminRoute } from './components/AdminRoute'
-import { initializeDefaultAdmin } from './lib/init-admin'
+import AdminPage from './pages/AdminPage'
 
 function App() {
-  // Initialize admin user on app startup
-  useEffect(() => {
-    initializeDefaultAdmin().catch(err => {
-      console.error('Failed to initialize admin:', err)
-    })
-  }, [])
-
   return (
     <BrowserRouter>
       <div className="min-h-screen">
@@ -36,23 +25,11 @@ function App() {
             <Route path="/about" element={<AboutPage />} />
             <Route path="/documentation" element={<DocumentationPage />} />
             <Route path="/contact-support" element={<ContactSupportPage />} />
-            <Route path="/admin-setup" element={<AdminSetupPage />} />
-            <Route path="/insights" element={<InsightsPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
-            <Route 
-              path="/admin-login" 
-              element={<AdminLoginPage />} 
-            />
-            <Route 
-              path="/admin" 
-              element={
-                <AdminRoute>
-                  <AdminDashboardPage />
-                </AdminRoute>
-              } 
-            />
+            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+            <Route path="/insights" element={<ProtectedRoute><InsightsPage /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminPage /></ProtectedRoute>} />
           </Routes>
         </main>
         

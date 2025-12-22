@@ -1,6 +1,8 @@
-import { Shield, Link, Mail, MessageSquare, QrCode } from 'lucide-react'
+import { Shield, Link, Mail, MessageSquare, QrCode, UserPlus, LogIn } from 'lucide-react'
 import { Button } from './ui/button'
 import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { blink } from '../lib/blink'
 
 interface HeroProps {
   onGetStarted: () => void
@@ -8,6 +10,16 @@ interface HeroProps {
 
 export function Hero({ onGetStarted }: HeroProps) {
   const navigate = useNavigate()
+  const [user, setUser] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const unsubscribe = blink.auth.onAuthStateChanged((state) => {
+      setUser(state.user)
+      setIsLoading(state.isLoading)
+    })
+    return unsubscribe
+  }, [])
   return (
     <section className="relative overflow-hidden py-24 lg:py-40 bg-background">
       {/* Cybersecurity grid background */}
@@ -36,9 +48,28 @@ export function Hero({ onGetStarted }: HeroProps) {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-6 justify-center mb-20 animate-fade-in" style={{ animationDelay: '0.4s' }}>
-            <Button size="lg" onClick={onGetStarted} variant="cyber" className="text-lg">
-              Initialize Scan
-            </Button>
+            {!isLoading && (
+              <>
+                {user ? (
+                  // Logged in: go to dashboard
+                  <Button size="lg" onClick={() => navigate('/dashboard')} variant="cyber" className="text-lg">
+                    Go to Dashboard
+                  </Button>
+                ) : (
+                  // Not logged in: show sign up and login
+                  <>
+                    <Button size="lg" onClick={() => navigate('/signup')} variant="cyber" className="text-lg">
+                      <UserPlus className="w-5 h-5 mr-2" />
+                      Create Account
+                    </Button>
+                    <Button size="lg" onClick={() => navigate('/login')} variant="glass" className="text-lg">
+                      <LogIn className="w-5 h-5 mr-2" />
+                      Sign In
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
             <Button size="lg" onClick={() => navigate('/documentation')} variant="glass" className="text-lg">
               View Documentation
             </Button>

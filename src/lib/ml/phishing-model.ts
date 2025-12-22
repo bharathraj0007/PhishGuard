@@ -222,22 +222,25 @@ export class PhishingDetectionModel {
 
   /**
    * Predict phishing probability for a single text
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predict(text: string): Promise<PredictionResult> {
     if (!this.isInitialized) {
       throw new Error('Model not initialized. Call initialize() first.');
     }
 
-    // Encode text to embedding
-    const embedding = await this.encodeTexts([text]);
-    
-    // Make prediction
-    const prediction = this.model!.predict(embedding) as tf.Tensor;
-    const phishingProb = (await prediction.data())[0];
-    
-    // Cleanup
-    embedding.dispose();
-    prediction.dispose();
+    // Run prediction with automatic tensor cleanup
+    const phishingProb = await tf.tidy(async () => {
+      // Encode text to embedding
+      const embedding = await this.encodeTexts([text]);
+      
+      // Make prediction
+      const prediction = this.model!.predict(embedding) as tf.Tensor;
+      const probData = await prediction.data();
+      
+      // Extract probability before tf.tidy disposes tensors
+      return probData[0];
+    });
 
     // Analyze suspicious patterns
     const suspiciousPatterns = this.analyzeSuspiciousPatterns(text);
@@ -265,22 +268,25 @@ export class PhishingDetectionModel {
 
   /**
    * Predict for multiple texts (batch prediction)
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async predictBatch(texts: string[]): Promise<PredictionResult[]> {
     if (!this.isInitialized) {
       throw new Error('Model not initialized. Call initialize() first.');
     }
 
-    // Encode all texts
-    const embeddings = await this.encodeTexts(texts);
-    
-    // Make predictions
-    const predictions = this.model!.predict(embeddings) as tf.Tensor;
-    const probabilities = await predictions.data();
-    
-    // Cleanup
-    embeddings.dispose();
-    predictions.dispose();
+    // Run batch prediction with automatic tensor cleanup
+    const probabilities = await tf.tidy(async () => {
+      // Encode all texts
+      const embeddings = await this.encodeTexts(texts);
+      
+      // Make predictions
+      const predictions = this.model!.predict(embeddings) as tf.Tensor;
+      const probs = await predictions.data();
+      
+      // Return copy before tf.tidy disposes tensors
+      return Array.from(probs);
+    });
 
     // Process each prediction
     return texts.map((text, i) => {
@@ -458,6 +464,7 @@ export class PhishingDetectionModel {
 
   /**
    * Evaluate model on test data
+   * Uses tf.tidy() for automatic tensor memory management
    */
   async evaluate(testData: TrainingData): Promise<ModelMetrics> {
     if (!this.isInitialized) {
@@ -466,50 +473,47 @@ export class PhishingDetectionModel {
 
     console.log('📊 Evaluating model...');
 
-    // Encode texts
-    const embeddings = await this.encodeTexts(testData.texts);
-    const labels = tf.tensor2d(testData.labels, [testData.labels.length, 1]);
+    // Run evaluation with automatic tensor cleanup
+    const metrics = await tf.tidy(async () => {
+      // Encode texts
+      const embeddings = await this.encodeTexts(testData.texts);
+      const labels = tf.tensor2d(testData.labels, [testData.labels.length, 1]);
 
-    // Evaluate
-    const result = this.model!.evaluate(embeddings, labels) as tf.Scalar[];
-    
-    const loss = await result[0].data();
-    const accuracy = await result[1].data();
+      // Evaluate
+      const result = this.model!.evaluate(embeddings, labels) as tf.Scalar[];
+      
+      const loss = await result[0].data();
+      const accuracy = await result[1].data();
 
-    // Make predictions for precision/recall
-    const predictions = this.model!.predict(embeddings) as tf.Tensor;
-    const predData = await predictions.data();
-    const labelData = await labels.data();
+      // Make predictions for precision/recall
+      const predictions = this.model!.predict(embeddings) as tf.Tensor;
+      const predData = await predictions.data();
+      const labelData = await labels.data();
 
-    // Calculate confusion matrix
-    let tp = 0, fp = 0, fn = 0, tn = 0;
-    for (let i = 0; i < predData.length; i++) {
-      const pred = predData[i] > 0.5 ? 1 : 0;
-      const actual = labelData[i];
+      // Calculate confusion matrix
+      let tp = 0, fp = 0, fn = 0, tn = 0;
+      for (let i = 0; i < predData.length; i++) {
+        const pred = predData[i] > 0.5 ? 1 : 0;
+        const actual = labelData[i];
 
-      if (pred === 1 && actual === 1) tp++;
-      else if (pred === 1 && actual === 0) fp++;
-      else if (pred === 0 && actual === 1) fn++;
-      else tn++;
-    }
+        if (pred === 1 && actual === 1) tp++;
+        else if (pred === 1 && actual === 0) fp++;
+        else if (pred === 0 && actual === 1) fn++;
+        else tn++;
+      }
 
-    const precision = tp / (tp + fp) || 0;
-    const recall = tp / (tp + fn) || 0;
-    const f1Score = 2 * (precision * recall) / (precision + recall) || 0;
+      const precision = tp / (tp + fp) || 0;
+      const recall = tp / (tp + fn) || 0;
+      const f1Score = 2 * (precision * recall) / (precision + recall) || 0;
 
-    // Cleanup
-    embeddings.dispose();
-    labels.dispose();
-    predictions.dispose();
-    result.forEach(r => r.dispose());
-
-    const metrics: ModelMetrics = {
-      accuracy: accuracy[0],
-      precision,
-      recall,
-      f1Score,
-      loss: loss[0]
-    };
+      return {
+        accuracy: accuracy[0],
+        precision,
+        recall,
+        f1Score,
+        loss: loss[0]
+      };
+    });
 
     console.log('📈 Evaluation Results:', metrics);
 

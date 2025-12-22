@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@blinkdotnew/sdk@0.19.2";
+import { createClient } from "npm:@blinkdotnew/sdk";
 
 // ═══════════════════════════════════════════════════════════════════
 // CORS HELPERS - DO NOT MODIFY
@@ -31,7 +30,7 @@ const blink = createClient({
 
 interface AnalyzeRequest {
   content: string;
-  scanType: "link" | "email" | "sms" | "qr";
+  scanType: "url" | "email" | "sms" | "qr";
   userId?: string;
   saveToHistory?: boolean;
 }
@@ -47,6 +46,36 @@ interface ScanResult {
 // ═══════════════════════════════════════════════════════════════════
 // ML-BASED DETECTION FUNCTIONS (No AI, Pure ML Models)
 // ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Calculate confidence score based on threat level and risk score
+ * - SAFE: confidence = (100 - riskScore) normalized to 85-99%
+ * - SUSPICIOUS: confidence = 60-80% based on risk score
+ * - DANGEROUS: confidence = 85-99% based on risk score
+ */
+function calculateConfidence(threatLevel: "safe" | "suspicious" | "dangerous", riskScore: number): number {
+  let confidence: number;
+  
+  if (threatLevel === "safe") {
+    // For safe content, low risk = high confidence
+    // riskScore 0-29 maps to confidence 85-99%
+    const safetyScore = 100 - riskScore;
+    confidence = Math.round(85 + (safetyScore / 100) * 14);
+  } else if (threatLevel === "suspicious") {
+    // For suspicious content, moderate confidence (60-80%)
+    // riskScore 30-49 maps to confidence 60-80%
+    const normalizedRisk = (riskScore - 30) / 20;
+    confidence = Math.round(60 + normalizedRisk * 20);
+  } else {
+    // For dangerous content, high confidence (85-99%)
+    // riskScore 50-100 maps to confidence 85-99%
+    const normalizedRisk = Math.min((riskScore - 50) / 50, 1);
+    confidence = Math.round(85 + normalizedRisk * 14);
+  }
+  
+  // Ensure confidence is within valid range (60-99)
+  return Math.max(60, Math.min(99, confidence));
+}
 
 /**
  * URL Analysis using Character-CNN ML Model
@@ -108,7 +137,8 @@ function analyzeURLML(url: string): ScanResult {
     threatLevel = "suspicious";
   }
 
-  const confidence = Math.min(riskScore, 100);
+  // Calculate confidence based on threat level and risk score
+  const confidence = calculateConfidence(threatLevel, riskScore);
 
   return {
     threatLevel,
@@ -198,7 +228,8 @@ function analyzeEmailML(content: string): ScanResult {
     threatLevel = "suspicious";
   }
 
-  const confidence = Math.min(riskScore, 100);
+  // Calculate confidence based on threat level and risk score
+  const confidence = calculateConfidence(threatLevel, riskScore);
 
   return {
     threatLevel,
@@ -279,12 +310,13 @@ function analyzeSMSML(smsContent: string): ScanResult {
     threatLevel = "suspicious";
   }
 
-  const confidence = Math.min(riskScore, 100);
+  // Calculate confidence based on threat level and risk score
+  const confidence = calculateConfidence(threatLevel, riskScore);
 
   return {
     threatLevel,
     confidence,
-    indicators: indicators.length > 0 ? indicators : ["No obvious phishing patterns"],
+    indicators: indicators.length > 0 ? indicators : ["✓ No obvious phishing patterns"],
     analysis: `ML Bi-LSTM Analysis: SMS analyzed for phishing text patterns (Confidence: ${confidence}%). ${
       threatLevel === "dangerous" ? "High phishing probability detected." :
       threatLevel === "suspicious" ? "Moderate phishing indicators present." :
@@ -344,7 +376,8 @@ function analyzeQRML(content: string): ScanResult {
     threatLevel = "suspicious";
   }
 
-  const confidence = Math.min(riskScore, 100);
+  // Calculate confidence based on threat level and risk score
+  const confidence = calculateConfidence(threatLevel, riskScore);
 
   return {
     threatLevel,
@@ -356,12 +389,13 @@ function analyzeQRML(content: string): ScanResult {
       "QR destination appears legitimate."
     }`,
     recommendations: threatLevel === "dangerous"
-      ? ["Do not scan this QR code", "Report suspicious QR codes", "Verify destination first"]
-      : ["QR appears safe", "Still verify destination", "Be cautious with unexpected QR codes"]
+      ? ["❌ Do not scan this QR code", "⚠️ Report suspicious QR codes", "🔍 Verify destination first"]
+      : ["✓ QR appears safe", "⚠️ Still verify destination", "🔍 Be cautious with unexpected QR codes"]
   };
 }
 
-serve(async (req) => {
+// Handler function
+async function handler(req: Request): Promise<Response> {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -381,15 +415,15 @@ serve(async (req) => {
       return errorResponse("Content and scanType are required", 400);
     }
 
-    if (!["link", "email", "sms", "qr"].includes(body.scanType)) {
-      return errorResponse("Invalid scanType. Must be: link, email, sms, or qr", 400);
+    if (!["url", "email", "sms", "qr"].includes(body.scanType)) {
+      return errorResponse("Invalid scanType. Must be: url, email, sms, or qr", 400);
     }
 
     // Perform ML-based analysis (NO AI)
     let result: ScanResult;
     
     switch (body.scanType) {
-      case "link":
+      case "url":
         result = analyzeURLML(body.content);
         break;
       case "email":
@@ -441,4 +475,6 @@ serve(async (req) => {
       500
     );
   }
-});
+}
+
+Deno.serve(handler);

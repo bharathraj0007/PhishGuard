@@ -6,13 +6,8 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { createClient } from '@blinkdotnew/sdk';
+import { blink } from '../blink';
 import type { ProcessedData, CharProcessedData } from './tfjs-data-processor';
-
-const blink = createClient({
-  projectId: 'phishguard-web-phishing-detector-eky2mdxr',
-  authRequired: false
-});
 
 export interface TrainingConfig {
   epochs: number;

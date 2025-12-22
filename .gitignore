@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Git credentials and config
+.git-credentials
+.gitconfig
+.env.local

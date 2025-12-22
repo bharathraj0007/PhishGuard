@@ -1,4 +1,4 @@
-export type ScanType = 'link' | 'email' | 'sms' | 'qr'
+export type ScanType = 'url' | 'email' | 'sms' | 'qr'
 
 export type ThreatLevel = 'safe' | 'suspicious' | 'dangerous'
 

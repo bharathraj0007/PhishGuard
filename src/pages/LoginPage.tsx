@@ -6,12 +6,60 @@ import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { blink } from '../lib/blink'
 import { toast } from 'sonner'
+import { DemoCredentials } from '../components/DemoCredentials'
+
+// Demo account configurations - these accounts will be auto-created if they don't exist
+const DEMO_ACCOUNTS = {
+  'admin@phishguard.com': {
+    password: 'AdminPass123!@#',
+    displayName: 'PhishGuard Admin',
+    role: 'admin'
+  },
+  'demo@phishguard.com': {
+    password: 'DemoPass123!@',
+    displayName: 'Demo User',
+    role: 'user'
+  }
+}
 
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
+
+  // Check if this is a demo account that might need auto-creation
+  const isDemoAccount = (email: string, password: string): boolean => {
+    const demo = DEMO_ACCOUNTS[email as keyof typeof DEMO_ACCOUNTS]
+    return demo !== undefined && demo.password === password
+  }
+
+  // Try to create demo account if it doesn't exist in Blink auth
+  const createDemoAccountIfNeeded = async (email: string, password: string): Promise<boolean> => {
+    const demo = DEMO_ACCOUNTS[email as keyof typeof DEMO_ACCOUNTS]
+    if (!demo) return false
+
+    try {
+      // Try to sign up the demo account
+      await blink.auth.signUp({
+        email,
+        password,
+        displayName: demo.displayName,
+        role: demo.role,
+        metadata: { isDemoAccount: true }
+      })
+      console.log(`Demo account created: ${email}`)
+      return true
+    } catch (signupError: any) {
+      // If account already exists, that's fine - we'll try to sign in again
+      if (signupError?.message?.includes('already exists')) {
+        console.log(`Demo account already exists: ${email}`)
+        return false
+      }
+      console.error('Failed to create demo account:', signupError)
+      return false
+    }
+  }
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,25 +88,47 @@ export function LoginPage() {
         // best-effort
       }
 
-      // Get user info to check role
-      const user = await blink.auth.me()
-
       toast.success('Welcome back!')
-      
-      // Redirect based on user role
-      if (user?.role === 'admin') {
-        navigate('/admin')
-      } else {
-        navigate('/dashboard')
-      }
+      navigate('/dashboard')
     } catch (error: any) {
       console.error('Sign in error:', error)
       
       const errorMessage = error?.message || error?.toString() || 'Failed to sign in'
       
+      // Check if this is a demo account that might need to be created
+      if (isDemoAccount(email, password) && 
+          (errorMessage.includes('Invalid') || errorMessage.includes('credentials') || errorMessage.includes('401'))) {
+        
+        toast.loading('Setting up demo account...')
+        
+        // Try to create the demo account
+        const created = await createDemoAccountIfNeeded(email, password)
+        
+        if (created) {
+          // Account was created, try signing in again
+          try {
+            const retryResult = await blink.auth.signInWithEmail(email, password)
+            if (retryResult) {
+              try {
+                await blink.auth.getValidToken()
+              } catch {
+                // best-effort
+              }
+              toast.dismiss()
+              toast.success('Demo account ready! Welcome!')
+              navigate('/dashboard')
+              return
+            }
+          } catch (retryError) {
+            console.error('Retry sign in failed:', retryError)
+          }
+        }
+        toast.dismiss()
+      }
+      
       if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
         toast.error('Invalid email or password')
-      } else if (errorMessage.includes('credentials')) {
+      } else if (errorMessage.includes('credentials') || errorMessage.includes('Invalid')) {
         toast.error('Invalid email or password')
       } else if (errorMessage.includes('verified')) {
         toast.error('Please verify your email first')
@@ -72,6 +142,12 @@ export function LoginPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Handle demo credentials autofill
+  const handleUseDemoCredentials = (demoEmail: string, demoPassword: string) => {
+    setEmail(demoEmail)
+    setPassword(demoPassword)
   }
 
 
@@ -154,6 +230,11 @@ export function LoginPage() {
               )}
             </Button>
           </form>
+        </div>
+
+        {/* Demo Credentials */}
+        <div className="text-center mt-4 animate-fade-in animate-delay-300">
+          <DemoCredentials onUseDemo={handleUseDemoCredentials} />
         </div>
 
         <div className="text-center mt-6 space-y-3">

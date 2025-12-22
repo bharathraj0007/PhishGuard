@@ -9,10 +9,16 @@
  *
  * Input: string
  * Output: phishing probability (0..1) + binary decision
+ * 
+ * Updated for browser stability with:
+ * - Safe backend initialization
+ * - Proper tensor disposal
+ * - GPU fallback handling
  */
 
 import * as tf from '@tensorflow/tfjs'
 import * as use from '@tensorflow-models/universal-sentence-encoder'
+import { initializeForInference, ensureBackendReady, getSafeTrainingConfig } from './tf-backend-manager'
 
 export interface UnifiedModelConfig {
   learningRate: number
@@ -46,21 +52,45 @@ export class UnifiedUSEPhishingModel {
   private encoder: use.UniversalSentenceEncoder | null = null
   private model: tf.LayersModel | null = null
   private initialized = false
+  private initializationPromise: Promise<void> | null = null
 
   constructor(private config: UnifiedModelConfig = DEFAULT_CONFIG) {}
 
   async initialize(): Promise<void> {
     if (this.initialized) return
-
-    this.encoder = await use.load()
-
-    // Try loading an already-trained model from IndexedDB.
-    const loaded = await this.tryLoadFromIndexedDB()
-    if (!loaded) {
-      this.model = this.buildModel()
+    
+    // Prevent multiple concurrent initializations
+    if (this.initializationPromise) {
+      return this.initializationPromise
     }
 
-    this.initialized = true
+    this.initializationPromise = this.doInitialize()
+    return this.initializationPromise
+  }
+
+  private async doInitialize(): Promise<void> {
+    try {
+      // Initialize TF backend for inference (allows WebGL with fallback)
+      await initializeForInference()
+      
+      console.log('📥 Loading Universal Sentence Encoder...')
+      this.encoder = await use.load()
+      console.log('✅ USE encoder loaded')
+
+      // Try loading an already-trained model from IndexedDB.
+      const loaded = await this.tryLoadFromIndexedDB()
+      if (!loaded) {
+        console.log('🔧 Building new model...')
+        this.model = this.buildModel()
+      }
+
+      this.initialized = true
+      console.log('✅ UnifiedUSEPhishingModel initialized')
+    } catch (error) {
+      console.error('❌ Model initialization failed:', error)
+      this.initializationPromise = null
+      throw error
+    }
   }
 
   private buildModel(): tf.LayersModel {
@@ -115,18 +145,32 @@ export class UnifiedUSEPhishingModel {
     if (!this.initialized) throw new Error('Model not initialized')
     if (!this.model) throw new Error('Model not ready')
 
-    const xs = await this.embed([text])
-    const y = this.model.predict(xs) as tf.Tensor
+    // Ensure backend is ready (handles context loss recovery)
+    await ensureBackendReady()
+
+    let xs: tf.Tensor | null = null
+    let y: tf.Tensor | null = null
 
     try {
+      xs = await this.embed([text])
+      y = this.model.predict(xs) as tf.Tensor
       const probability = (await y.data())[0] ?? 0
+      
       return {
         probability,
         isPhishing: probability >= 0.5,
       }
+    } catch (error) {
+      console.error('Prediction error:', error)
+      // Return safe default on error
+      return {
+        probability: 0,
+        isPhishing: false,
+      }
     } finally {
-      xs.dispose()
-      y.dispose()
+      // Safe cleanup
+      if (xs && !xs.isDisposed) xs.dispose()
+      if (y && !y.isDisposed) y.dispose()
     }
   }
 
@@ -134,18 +178,32 @@ export class UnifiedUSEPhishingModel {
     if (!this.initialized) throw new Error('Model not initialized')
     if (!this.model) throw new Error('Model not ready')
 
-    const xs = await this.embed(texts)
-    const y = this.model.predict(xs) as tf.Tensor
+    // Ensure backend is ready (handles context loss recovery)
+    await ensureBackendReady()
+
+    let xs: tf.Tensor | null = null
+    let y: tf.Tensor | null = null
 
     try {
+      xs = await this.embed(texts)
+      y = this.model.predict(xs) as tf.Tensor
       const probs = await y.data()
+      
       return Array.from(probs).map((probability) => ({
         probability,
         isPhishing: probability >= 0.5,
       }))
+    } catch (error) {
+      console.error('Batch prediction error:', error)
+      // Return safe defaults on error
+      return texts.map(() => ({
+        probability: 0,
+        isPhishing: false,
+      }))
     } finally {
-      xs.dispose()
-      y.dispose()
+      // Safe cleanup
+      if (xs && !xs.isDisposed) xs.dispose()
+      if (y && !y.isDisposed) y.dispose()
     }
   }
 
