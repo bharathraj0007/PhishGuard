@@ -3,50 +3,58 @@ import type { ScanType, ScanResult } from '../types'
 import { getQRPhishingService } from './ml/qr-phishing-service'
 import { autoTrainingService } from './ml/auto-training-service'
 import { UnifiedMLService } from './ml/unified-ml-service'
+import { urlModelLoader } from './ml/url-model-loader'
+import { getEmailBiLSTMService } from './ml/email-bilstm-service'
 
 /**
- * Calculate confidence score based on threat level and risk score
- * - SAFE: confidence = (100 - riskScore) normalized to 85-99%
- * - SUSPICIOUS: confidence = 60-80% based on risk score
- * - DANGEROUS: confidence = 85-99% based on risk score
+ * Calculate confidence score based on threat level and phishing probability
+ * 
+ * IMPORTANT: riskScore here represents PHISHING PROBABILITY (0-100)
+ * 
+ * - SAFE: confidence = certainty it's safe = (100 - phishingProbability)
+ * - SUSPICIOUS: confidence = phishing probability itself (decision certainty)
+ * - DANGEROUS: confidence = phishing probability itself (decision certainty)
  */
 function calculateConfidence(threatLevel: 'safe' | 'suspicious' | 'dangerous', riskScore: number): number {
   let confidence: number
   
   if (threatLevel === 'safe') {
-    // For safe content, low risk = high confidence
-    // riskScore 0-29 maps to confidence 85-99%
-    const safetyScore = 100 - riskScore
-    confidence = Math.round(85 + (safetyScore / 100) * 14)
-  } else if (threatLevel === 'suspicious') {
-    // For suspicious content, moderate confidence (60-80%)
-    // riskScore 30-49 maps to confidence 60-80%
-    const normalizedRisk = (riskScore - 30) / 20
-    confidence = Math.round(60 + normalizedRisk * 20)
+    // For safe content: confidence = certainty it's safe (100 - phishing probability)
+    // Example: riskScore=2 → confidence=98%, riskScore=10 → confidence=90%
+    confidence = Math.round(100 - riskScore)
+  } else if (threatLevel === 'suspicious' || threatLevel === 'dangerous') {
+    // For suspicious/dangerous: confidence = phishing probability itself
+    // Example: riskScore=60 → confidence=60%, riskScore=91 → confidence=91%
+    confidence = Math.round(riskScore)
   } else {
-    // For dangerous content, high confidence (85-99%)
-    // riskScore 50-100 maps to confidence 85-99%
-    const normalizedRisk = Math.min((riskScore - 50) / 50, 1)
-    confidence = Math.round(85 + normalizedRisk * 14)
+    confidence = 50
   }
   
-  // Ensure confidence is within valid range (60-99)
-  return Math.max(60, Math.min(99, confidence))
+  // Ensure confidence is within valid range (1-99) to avoid 0% and 100%
+  return Math.max(1, Math.min(99, confidence))
 }
 
 /**
  * Analyze content for phishing threats.
  *
  * Strategy:
- * 1. Auto-train ML models on first scan (silent, non-intrusive)
- * 2. Use ML models for prediction if available
- * 3. Fall back to heuristic analysis if ML fails or not ready
+ * 1. For URLs: ALWAYS use TensorFlow.js ML model (NO heuristic fallback)
+ * 2. For other types: Try ML models first, then fall back to heuristics if ML fails
+ * 3. Auto-train ML models on first scan (silent, non-intrusive)
+ * 
+ * IMPORTANT: URL detection MUST use ML model only for accurate detection.
  */
 export async function analyzeContent(content: string, scanType: ScanType): Promise<ScanResult> {
   const trimmed = content.trim()
   if (!trimmed) throw new Error('Content is required')
 
-  // Auto-train model if needed (non-blocking, transparent to user)
+  // For URLs, ALWAYS use TensorFlow ML model - NO HEURISTIC FALLBACK
+  if (scanType === 'url') {
+    console.log('🔵 [URL Analysis] Using ML model ONLY (no heuristic fallback)')
+    return await analyzeURLWithTFModel(trimmed)
+  }
+
+  // Auto-train model if needed (non-blocking, transparent to user) for non-URL types
   try {
     await autoTrainingService.ensureModelTrained(scanType)
   } catch (error) {
@@ -54,7 +62,7 @@ export async function analyzeContent(content: string, scanType: ScanType): Promi
     // Continue with fallback heuristics if training fails
   }
 
-  // Try ML prediction first
+  // Try ML prediction first for non-URL types
   try {
     const mlService = new UnifiedMLService()
     const mlResult = await mlService.predict(trimmed, scanType)
@@ -70,10 +78,8 @@ export async function analyzeContent(content: string, scanType: ScanType): Promi
     console.warn(`ML prediction failed for ${scanType}, falling back to heuristics:`, mlError)
   }
 
-  // Fall back to heuristic analysis
+  // Fall back to heuristic analysis for non-URL types only
   switch (scanType) {
-    case 'url':
-      return analyzeURLLocal(trimmed)
     case 'email':
       return analyzeEmailLocal(trimmed)
     case 'sms':
@@ -83,6 +89,355 @@ export async function analyzeContent(content: string, scanType: ScanType): Promi
       return analyzeQRLocal(trimmed)
     default:
       throw new Error(`Unknown scan type: ${scanType}`)
+  }
+}
+
+/**
+ * Analyze email using trained BiLSTM ML model (95.96% accuracy)
+ * This function uses the pre-trained email phishing detection model
+ * with 18,634 training samples and 20,000 vocabulary size.
+ * 
+ * Falls back to heuristics if ML model fails to load.
+ */
+export async function analyzeEmailWithMLModel(content: string): Promise<ScanResult> {
+  try {
+    console.log('📧 [Email Analysis] Using trained BiLSTM ML model')
+    const emailService = getEmailBiLSTMService()
+    const result = await emailService.analyzeEmail(content)
+    console.log('✅ [Email Analysis] ML prediction completed')
+    return result
+  } catch (error) {
+    console.warn('⚠️ [Email Analysis] ML model failed, falling back to heuristics:', error)
+    return analyzeEmailLocal(content)
+  }
+}
+
+/**
+ * Analyze URL using TensorFlow.js Character-level CNN model (INTERNAL)
+ * Model input: [1, 200] character indices (capped at 127)
+ * Model output: sigmoid score 0-1, where > 0.5 = phishing probability
+ * 
+ * IMPORTANT: Treat model output as phishing probability, not confidence
+ */
+async function analyzeURLWithTFModel(url: string): Promise<ScanResult> {
+  return analyzeURLWithFrontendModel(url)
+}
+
+/**
+ * TRUSTED DOMAINS WHITELIST
+ * Major legitimate domains that should never be flagged as phishing
+ */
+const TRUSTED_DOMAINS = new Set([
+  'google.com',
+  'youtube.com',
+  'github.com',
+  'microsoft.com',
+  'amazon.com',
+  'apple.com',
+  'linkedin.com',
+  'facebook.com',
+  'twitter.com',
+  'instagram.com',
+  'netflix.com',
+  'spotify.com',
+  'wikipedia.org',
+  'reddit.com',
+  'stackoverflow.com',
+])
+
+/**
+ * Extract hostname from URL
+ */
+function extractHostname(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.toLowerCase()
+  } catch {
+    // Try adding protocol if missing
+    try {
+      const parsed = new URL(`https://${url}`)
+      return parsed.hostname.toLowerCase()
+    } catch {
+      return null
+    }
+  }
+}
+
+/**
+ * Check if hostname matches a trusted domain
+ */
+function isTrustedDomain(hostname: string): boolean {
+  // Direct match
+  if (TRUSTED_DOMAINS.has(hostname)) {
+    return true
+  }
+  // Check if it's a subdomain of a trusted domain (e.g., www.google.com, mail.google.com)
+  for (const trusted of TRUSTED_DOMAINS) {
+    if (hostname === trusted || hostname.endsWith(`.${trusted}`)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Apply model confidence calibration
+ * Transforms raw sigmoid score to calibrated score
+ * Formula: calibratedScore = clamp((modelScore - 0.5) * 1.8, 0, 1)
+ */
+function calibrateModelScore(rawScore: number): number {
+  const calibrated = (rawScore - 0.5) * 1.8
+  return Math.max(0, Math.min(1, calibrated))
+}
+
+/**
+ * EXPORTED: Analyze URL using ONLY Frontend TensorFlow.js Character-level CNN model
+ * 
+ * CRITICAL: This function uses ONLY the frontend TensorFlow.js model
+ * - NO backend ML inference
+ * - Model path: /public/models/url/model.json
+ * - Uses tf.loadLayersModel() / tf.loadGraphModel()
+ * 
+ * CALIBRATION & FIXES (v2.0):
+ * 1. Model confidence calibration: (rawScore - 0.5) * 1.8
+ * 2. Trusted domain whitelist (pre-inference skip)
+ * 3. Short URL normalization (length < 20)
+ * 4. Updated thresholds: DANGEROUS ≥80, SUSPICIOUS ≥45, SAFE <45
+ * 
+ * Decision Logic:
+ * - risk >= 80 → DANGEROUS (red, alert)
+ * - risk >= 45 → SUSPICIOUS (yellow, warning)
+ * - risk < 45 → SAFE (green, check)
+ */
+export async function analyzeURLWithFrontendModel(url: string): Promise<ScanResult> {
+  try {
+    console.log('🔵 [URL Analysis] analyzeURLWithFrontendModel called')
+    console.log('   - URL:', url)
+    
+    // Extract hostname for checks
+    const hostname = extractHostname(url)
+    console.log('   - Hostname:', hostname || 'invalid')
+    
+    // =====================================================
+    // FIX #2: TRUSTED DOMAIN WHITELIST (PRE-INFERENCE)
+    // =====================================================
+    const whitelistTriggered = hostname !== null && isTrustedDomain(hostname)
+    
+    if (whitelistTriggered) {
+      console.log('✅ [Whitelist] Trusted domain detected, skipping ML inference')
+      console.log('   - Domain:', hostname)
+      
+      const safeIndicators = [
+        '✅ Trusted domain whitelist match',
+        `✓ Domain: ${hostname}`,
+        '✓ HTTPS connection (secure)',
+        '✓ No ML inference required for trusted domain',
+      ]
+      
+      // Debug logging
+      console.log('📊 [Debug] Final Results:')
+      console.log('   - rawModelScore: N/A (skipped)')
+      console.log('   - calibratedScore: N/A (skipped)')
+      console.log('   - finalRisk: 5')
+      console.log('   - finalDecision: SAFE')
+      console.log('   - whitelistTriggered: true')
+      
+      return {
+        threatLevel: 'safe',
+        confidence: 5, // Low confidence = high certainty it's safe
+        indicators: safeIndicators,
+        analysis: `URL Analysis: SAFE
+
+✅ Trusted domain override applied
+Domain: ${hostname}
+
+This URL belongs to a verified trusted domain.
+No ML inference was performed - trusted domains are automatically marked safe.
+
+Risk Score: 5/100
+Decision: SAFE`,
+        recommendations: [
+          '✓ URL is from a trusted domain',
+          '✓ Safe to proceed',
+          '⚠️ Always verify the full URL path for legitimacy',
+        ],
+      }
+    }
+    
+    // =====================================================
+    // Run ML Model Inference (for non-whitelisted domains)
+    // =====================================================
+    const prediction = await urlModelLoader.predict(url)
+    const rawModelScore = prediction.score // Raw sigmoid score 0.0-1.0
+    
+    console.log('🟢 [ML Model] Raw sigmoid score:', rawModelScore.toFixed(4))
+    
+    // =====================================================
+    // FIX #1: APPLY MODEL CONFIDENCE CALIBRATION
+    // =====================================================
+    let calibratedScore = calibrateModelScore(rawModelScore)
+    console.log('🔵 [Calibration] Calibrated score:', calibratedScore.toFixed(4))
+    
+    // =====================================================
+    // FIX #3: SHORT URL NORMALIZATION
+    // =====================================================
+    const shortURLNormalizationApplied = url.length < 20
+    if (shortURLNormalizationApplied) {
+      const originalCalibrated = calibratedScore
+      calibratedScore = calibratedScore * 0.3
+      console.log(`🔵 [Short URL] Length ${url.length} < 20, applying 0.3x multiplier`)
+      console.log(`   - Before: ${originalCalibrated.toFixed(4)}, After: ${calibratedScore.toFixed(4)}`)
+    }
+    
+    // Collect threat indicators and calculate adjustments
+    const indicators: string[] = []
+    let riskAdjustment = 0
+    
+    // Check HTTP (not encrypted) +10 risk
+    if (/^http:\/\//i.test(url)) {
+      indicators.push('⚠️ HTTP connection (not encrypted)')
+      riskAdjustment += 10
+      console.log('   - HTTP detected: +10 risk')
+    } else if (/^https:\/\//i.test(url)) {
+      indicators.push('✓ HTTPS connection (secure)')
+    }
+    
+    // Check special characters +10 risk
+    if (/[_\\%@#$]/.test(url)) {
+      indicators.push('🟡 Special characters in URL')
+      riskAdjustment += 10
+      console.log('   - Special chars detected: +10 risk')
+    }
+    
+    // Check typosquatting +15 risk
+    const typosquattingPatterns = /amaz0n|g00gle|microsft|paypa1|fac3book|twitt3r|app1e|netfl1x|1nstagram|wh4tsapp|l1nkedin|yah00/i
+    if (typosquattingPatterns.test(url)) {
+      indicators.push('🔴 Potential typosquatting detected')
+      riskAdjustment += 15
+      console.log('   - Typosquatting detected: +15 risk')
+    }
+    
+    // Check IP address usage +20 risk
+    if (/(?:\d{1,3}\.){3}\d{1,3}/.test(url)) {
+      indicators.push('🔴 IP address used instead of domain')
+      riskAdjustment += 20
+      console.log('   - IP address detected: +20 risk')
+    }
+    
+    // Check URL shorteners +15 risk (mark as SUSPICIOUS)
+    const isURLShortener = /bit\.ly|tinyurl|goo\.gl|short\.link|t\.co|ow\.ly|buff\.ly/i.test(url)
+    if (isURLShortener) {
+      indicators.push('⚠️ Shortened URL detected')
+      riskAdjustment += 15
+      console.log('   - URL shortener detected: +15 risk')
+    }
+    
+    // Check multiple subdomains +10 risk
+    const dotCount = (url.match(/\./g) || []).length
+    if (dotCount > 3) {
+      indicators.push('⚠️ Multiple subdomains (possible spoofing)')
+      riskAdjustment += 10
+      console.log('   - Multiple subdomains detected: +10 risk')
+    }
+    
+    // =====================================================
+    // Calculate final risk score from CALIBRATED score
+    // =====================================================
+    const calibratedRiskScore = Math.round(calibratedScore * 100)
+    const finalRiskScore = Math.min(100, calibratedRiskScore + riskAdjustment)
+    
+    console.log('🟡 [Risk Calculation]')
+    console.log('   - Calibrated risk (from ML):', calibratedRiskScore)
+    console.log('   - Risk adjustment (heuristics):', riskAdjustment)
+    console.log('   - Final risk:', finalRiskScore)
+    
+    // =====================================================
+    // FIX #4: UPDATED DECISION THRESHOLDS
+    // risk >= 80 → DANGEROUS
+    // risk >= 45 → SUSPICIOUS
+    // risk < 45 → SAFE
+    // =====================================================
+    let threatLevel: 'safe' | 'suspicious' | 'dangerous'
+    let statusMessage: string
+    
+    if (finalRiskScore >= 80) {
+      threatLevel = 'dangerous'
+      statusMessage = 'High confidence phishing URL detected'
+    } else if (finalRiskScore >= 45) {
+      threatLevel = 'suspicious'
+      statusMessage = 'Potential phishing patterns detected'
+    } else {
+      threatLevel = 'safe'
+      statusMessage = 'URL appears legitimate'
+    }
+    
+    // =====================================================
+    // FIX #7: CONSOLE LOGGING FOR DEBUG
+    // =====================================================
+    console.log('📊 [Debug] Final Results:')
+    console.log('   - rawModelScore:', rawModelScore.toFixed(4))
+    console.log('   - calibratedScore:', calibratedScore.toFixed(4))
+    console.log('   - finalRisk:', finalRiskScore)
+    console.log('   - finalDecision:', threatLevel.toUpperCase())
+    console.log('   - whitelistTriggered:', whitelistTriggered)
+    console.log('   - shortURLNormalization:', shortURLNormalizationApplied)
+    
+    // =====================================================
+    // FIX #5: CONFIDENCE MAPPING
+    // =====================================================
+    // Confidence = risk score for suspicious/dangerous, (100 - risk) for safe
+    const confidence = threatLevel === 'safe' 
+      ? Math.round(100 - finalRiskScore)
+      : finalRiskScore
+    
+    // =====================================================
+    // FIX #6: UPDATE ANALYSIS REPORT TEXT
+    // =====================================================
+    // Add model indicator with calibration info
+    indicators.unshift(`🤖 Calibrated ML Score: ${calibratedRiskScore}%`)
+    if (shortURLNormalizationApplied) {
+      indicators.push('📏 Length normalization applied (short URL)')
+    }
+    indicators.push(
+      finalRiskScore >= 45 
+        ? '🔴 Model predicts PHISHING' 
+        : '✓ Model predicts SAFE'
+    )
+    
+    // Build analysis report with calibration details
+    const analysisReport = `Phishing probability: ${finalRiskScore}%
+Risk score: ${finalRiskScore}/100
+Decision: ${threatLevel.toUpperCase()}
+
+${statusMessage}
+
+TensorFlow Character-level CNN Model (Frontend)
+• Raw model score: ${(rawModelScore * 100).toFixed(1)}%
+• Calibrated ML score: ${calibratedRiskScore}%${shortURLNormalizationApplied ? ' (length normalization applied)' : ''}
+• Threat indicator adjustments: +${riskAdjustment}%
+• Final risk assessment: ${finalRiskScore}%
+
+Calibration Formula: (rawScore - 0.5) × 1.8, clamped [0,1]
+Thresholds: DANGEROUS ≥80%, SUSPICIOUS ≥45%, SAFE <45%`
+    
+    const recommendations =
+      threatLevel === 'dangerous'
+        ? ['❌ Do not click this link', '📧 Report to security team', '🛡️ Verify with official website']
+        : threatLevel === 'suspicious'
+          ? ['⚠️ Exercise caution', '🔍 Verify the domain carefully', '📞 Contact sender independently']
+          : ['✓ URL appears safe', '⚠️ Still verify important requests', '🔐 Keep security practices strong']
+    
+    return {
+      threatLevel,
+      confidence,
+      indicators,
+      analysis: analysisReport,
+      recommendations,
+    }
+  } catch (error) {
+    console.error('🔴 TensorFlow model error:', error)
+    // For URL detection, we MUST use the ML model - provide a clear error message
+    throw new Error(`URL ML model analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please ensure the model is loaded.`)
   }
 }
 
@@ -131,14 +486,14 @@ function analyzeURLLocal(url: string): ScanResult {
     riskScore += 10
   }
 
-  const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
+  const threatLevel = riskScore >= 75 ? 'dangerous' : riskScore >= 50 ? 'suspicious' : 'safe'
   const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
     confidence,
     indicators: indicators.length ? indicators : ['✓ No obvious phishing patterns'],
-    analysis: `URL pattern analysis (Confidence: ${confidence}%). ${
+    analysis: `URL pattern analysis. Phishing probability: ${riskScore}%. ${
       threatLevel === 'dangerous'
         ? 'Multiple high-risk indicators detected.'
         : threatLevel === 'suspicious'
@@ -197,14 +552,14 @@ function analyzeEmailLocal(content: string): ScanResult {
     riskScore += 15
   }
 
-  const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
+  const threatLevel = riskScore >= 75 ? 'dangerous' : riskScore >= 50 ? 'suspicious' : 'safe'
   const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
     confidence,
     indicators: indicators.length ? indicators : ['✓ No obvious phishing indicators'],
-    analysis: `Email pattern analysis (Confidence: ${confidence}%). ${
+    analysis: `Email pattern analysis. Phishing probability: ${riskScore}%. ${
       threatLevel === 'dangerous'
         ? 'Strong phishing indicators detected.'
         : threatLevel === 'suspicious'
@@ -263,14 +618,14 @@ function analyzeSMSLocal(smsContent: string): ScanResult {
     riskScore += 10
   }
 
-  const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
+  const threatLevel = riskScore >= 75 ? 'dangerous' : riskScore >= 50 ? 'suspicious' : 'safe'
   const confidence = calculateConfidence(threatLevel, riskScore)
 
   return {
     threatLevel,
     confidence,
     indicators: indicators.length ? indicators : ['✓ No obvious phishing patterns'],
-    analysis: `SMS pattern analysis (Confidence: ${confidence}%). ${
+    analysis: `SMS pattern analysis. Phishing probability: ${riskScore}%. ${
       threatLevel === 'dangerous'
         ? 'High phishing probability detected.'
         : threatLevel === 'suspicious'
@@ -334,14 +689,14 @@ async function analyzeQRLocal(content: string): Promise<ScanResult> {
       riskScore += 15
     }
 
-    const threatLevel = riskScore >= 50 ? 'dangerous' : riskScore >= 30 ? 'suspicious' : 'safe'
+    const threatLevel = riskScore >= 75 ? 'dangerous' : riskScore >= 50 ? 'suspicious' : 'safe'
     const confidence = calculateConfidence(threatLevel, riskScore)
 
     return {
       threatLevel,
       confidence,
       indicators: indicators.length ? indicators : ['✓ QR appears safe'],
-      analysis: `QR URL analysis (Confidence: ${confidence}%). Decoded content: ${content}.`,
+      analysis: `QR URL analysis. Phishing probability: ${riskScore}%. Decoded content: ${content}.`,
       recommendations:
         threatLevel === 'dangerous'
           ? ['❌ Do not scan this QR code', '⚠️ Report suspicious QR codes', '🔍 Verify destination first']

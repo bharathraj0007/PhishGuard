@@ -11,7 +11,8 @@
  */
 
 import { TFIDFEmailModel, getEmailModel, type EmailPrediction } from './tfidf-email-model';
-import { BiLSTMSMSModel, getSMSModel, type SMSPrediction } from './bilstm-sms-model';
+// SMS model is DISABLED in frontend - SMS uses backend-only inference
+// import { BiLSTMSMSModel, getSMSModel, type SMSPrediction } from './bilstm-sms-model';
 import { LightweightURLCNN, getURLCNNModel, type URLPrediction } from './lightweight-url-cnn';
 import { getQRPhishingService } from './qr-phishing-service';
 import type { ScanType } from '../../types';
@@ -48,16 +49,21 @@ export interface MLTrainingResult {
 
 /**
  * Unified ML Service Class
+ * 
+ * IMPORTANT: SMS prediction is handled by backend-only inference.
+ * Do NOT use this service for SMS - use the scanSMS() function from api-client.ts instead.
  */
 export class UnifiedMLService {
   private emailModel: TFIDFEmailModel;
-  private smsModel: BiLSTMSMSModel;
+  // SMS model is DISABLED - SMS uses backend-only inference
+  // private smsModel: BiLSTMSMSModel;
   private urlModel: LightweightURLCNN;
   private qrService: ReturnType<typeof getQRPhishingService>;
 
   constructor() {
     this.emailModel = getEmailModel();
-    this.smsModel = getSMSModel();
+    // SMS model is DISABLED - SMS uses backend-only inference
+    // this.smsModel = getSMSModel();
     this.urlModel = getURLCNNModel();
     this.qrService = getQRPhishingService();
   }
@@ -100,15 +106,16 @@ export class UnifiedMLService {
 
   /**
    * Predict SMS phishing
+   * 
+   * IMPORTANT: SMS prediction is handled by backend-only inference.
+   * This method should NOT be called - use scanSMS() from api-client.ts instead.
    */
-  private async predictSMS(sms: string): Promise<MLPredictionResult> {
-    if (!this.smsModel.isReady()) {
-      throw new Error('SMS model not trained. Please train the model first.');
-    }
-
-    const prediction: SMSPrediction = await this.smsModel.predictSMS(sms);
-
-    return this.formatSMSResult(prediction);
+  private async predictSMS(_sms: string): Promise<MLPredictionResult> {
+    // SMS uses BACKEND-ONLY inference - do not train or run models in browser
+    throw new Error(
+      'SMS prediction must use backend-only inference. ' +
+      'Use scanSMS() from api-client.ts instead of UnifiedMLService.predict() for SMS.'
+    );
   }
 
   /**
@@ -183,7 +190,22 @@ export class UnifiedMLService {
    * Format URL prediction result
    */
   private formatURLResult(prediction: URLPrediction, url: string): MLPredictionResult {
-    const threatLevel = this.calculateThreatLevel(prediction.probability);
+    const phishingProbability = prediction.probability;
+    const threatLevel = this.calculateThreatLevel(phishingProbability);
+    
+    // Calculate confidence and risk score based on threat level and probability
+    let confidence: number;
+    let riskScore: number;
+    
+    if (threatLevel === 'safe') {
+      // For safe content: high confidence in it being safe
+      confidence = Math.round((1 - phishingProbability) * 100);
+      riskScore = Math.round(phishingProbability * 100);
+    } else {
+      // For suspicious/dangerous: confidence is the phishing probability
+      confidence = Math.round(phishingProbability * 100);
+      riskScore = confidence;
+    }
     
     // Filter out undefined/null values to prevent runtime errors
     const suspiciousPatterns = (prediction.features.suspiciousPatterns || [])
@@ -191,21 +213,22 @@ export class UnifiedMLService {
     
     return {
       isPhishing: prediction.isPhishing,
-      confidence: Math.round(prediction.confidence * 100),
+      confidence,
       threatLevel,
       indicators: suspiciousPatterns.map(p => p.replace(/_/g, ' ')),
-      analysis: this.generateURLAnalysis(prediction, url),
+      analysis: this.generateURLAnalysis(prediction, url, phishingProbability),
       recommendations: this.generateURLRecommendations(prediction.isPhishing),
-      riskScore: prediction.features.riskScore
+      riskScore
     };
   }
 
   /**
    * Calculate threat level from probability
+   * probability = phishing probability (0 to 1)
    */
   private calculateThreatLevel(probability: number): 'safe' | 'suspicious' | 'dangerous' {
-    if (probability < 0.3) return 'safe';
-    if (probability < 0.7) return 'suspicious';
+    if (probability < 0.5) return 'safe';
+    if (probability < 0.75) return 'suspicious';
     return 'dangerous';
   }
 
@@ -256,9 +279,12 @@ export class UnifiedMLService {
   /**
    * Generate URL analysis
    */
-  private generateURLAnalysis(prediction: URLPrediction, url: string): string {
+  private generateURLAnalysis(prediction: URLPrediction, url: string, phishingProbability: number): string {
+    const phishingPercentage = Math.round(phishingProbability * 100);
+    
     if (!prediction.isPhishing) {
-      return `This URL appears to be safe (${Math.round((1 - prediction.probability) * 100)}% confidence). No major security concerns detected.`;
+      const safeConfidence = Math.round((1 - phishingProbability) * 100);
+      return `This URL appears to be safe (${safeConfidence}% confidence). Phishing probability: ${phishingPercentage}%. No major security concerns detected.`;
     }
 
     // Safely filter suspicious patterns
@@ -268,12 +294,12 @@ export class UnifiedMLService {
       ? suspiciousPatterns.map(p => p.replace(/_/g, ' ')).join(', ') 
       : 'suspicious characteristics';
 
-    if (prediction.probability > 0.8) {
-      return `DANGER: This URL is highly likely to be malicious (${Math.round(prediction.probability * 100)}% confidence). ` +
+    if (phishingProbability > 0.75) {
+      return `DANGER: This URL is highly likely to be malicious (${phishingPercentage}% phishing probability). ` +
              `Detected indicators: ${patternsDisplay}. Do NOT visit this link.`;
     }
 
-    return `WARNING: This URL shows suspicious characteristics (${Math.round(prediction.probability * 100)}% confidence). ` +
+    return `WARNING: This URL shows suspicious characteristics (${phishingPercentage}% phishing probability). ` +
            `Issues found: ${patternsDisplay}. Proceed with extreme caution.`;
   }
 
@@ -388,48 +414,24 @@ export class UnifiedMLService {
   }
 
   /**
-   * Train SMS model
+   * Train SMS model - DISABLED
+   * 
+   * SMS uses BACKEND-ONLY inference. This method is intentionally disabled.
+   * The backend has a pre-trained TensorFlow SavedModel that handles all SMS detection.
    */
   async trainSMS(
-    smsMessages: string[],
-    labels: number[],
-    onProgress?: (progress: MLTrainingProgress) => void
+    _smsMessages: string[],
+    _labels: number[],
+    _onProgress?: (progress: MLTrainingProgress) => void
   ): Promise<MLTrainingResult> {
-    try {
-      console.log('🏋️ Starting SMS model training...');
-
-      const metrics = await this.smsModel.train(
-        smsMessages,
-        labels,
-        undefined,
-        0.2,
-        (epoch, logs) => {
-          if (onProgress) {
-            onProgress({
-              epoch: epoch + 1,
-              totalEpochs: 15,
-              loss: logs.loss,
-              accuracy: logs.acc,
-              valLoss: logs.val_loss,
-              valAccuracy: logs.val_acc
-            });
-          }
-        }
-      );
-
-      return {
-        success: true,
-        metrics,
-        message: `SMS model trained successfully with ${Math.round(metrics.accuracy * 100)}% accuracy`
-      };
-    } catch (error) {
-      console.error('SMS training error:', error);
-      return {
-        success: false,
-        metrics: { accuracy: 0, loss: 0 },
-        message: `Training failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
-    }
+    console.warn('⚠️ SMS model training is DISABLED');
+    console.warn('📱 SMS detection uses backend-only inference with pre-trained model');
+    
+    return {
+      success: false,
+      metrics: { accuracy: 0, loss: 0 },
+      message: 'SMS model training is disabled. SMS detection uses backend-only inference.'
+    };
   }
 
   /**

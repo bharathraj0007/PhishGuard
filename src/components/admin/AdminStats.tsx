@@ -25,9 +25,19 @@ interface SystemStats {
 export default function AdminStats() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   useEffect(() => {
+    // Load stats immediately
     loadStats();
+
+    // Set up auto-refresh interval (every 30 seconds)
+    const interval = setInterval(() => {
+      loadStats();
+    }, 30000);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(interval);
   }, []);
 
   const loadStats = async () => {
@@ -43,36 +53,69 @@ export default function AdminStats() {
       // Calculate stats
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayISO = todayStart.toISOString();
       
+      // Active users: those who signed in within last 30 days
+      // Handle both snake_case (from DB) and camelCase (SDK conversion)
       const activeUsers = users.filter(u => {
-        if (!u.last_sign_in) return false;
-        const lastSignIn = new Date(u.last_sign_in);
-        const daysSinceLastSignIn = (now.getTime() - lastSignIn.getTime()) / (1000 * 60 * 60 * 24);
+        const lastSignIn = u.lastSignIn || u.last_sign_in;
+        if (!lastSignIn) return false;
+        const lastSignInDate = new Date(lastSignIn);
+        const daysSinceLastSignIn = (now.getTime() - lastSignInDate.getTime()) / (1000 * 60 * 60 * 24);
         return daysSinceLastSignIn <= 30;
       }).length;
 
+      // Today's scans: compare ISO strings for accurate date filtering
       const todayScans = scans.filter(s => {
-        const scanDate = new Date(s.created_at);
-        return scanDate >= todayStart;
+        const scanDate = s.createdAt || s.created_at;
+        if (!scanDate) return false;
+        return scanDate >= todayISO;
       }).length;
 
-      const phishingScans = scans.filter(s => 
-        s.threat_level === 'high' || s.threat_level === 'medium'
-      );
+      // Phishing detected: threat_level is 'dangerous' or 'suspicious'
+      const phishingScans = scans.filter(s => {
+        const threatLevel = s.threatLevel || s.threat_level;
+        return threatLevel === 'dangerous' || threatLevel === 'suspicious';
+      });
 
-      const avgConfidence = scans.length > 0
-        ? scans.reduce((sum, s) => sum + s.confidence, 0) / scans.length
+      // Calculate average confidence - DB stores 0-100 values, no multiplication needed
+      // Also handle potential null/undefined values and clamp to valid range
+      const validConfidences = scans
+        .map(s => {
+          const conf = s.confidence;
+          if (conf === null || conf === undefined) return null;
+          // Ensure confidence is within 0-100 range
+          const numConf = typeof conf === 'string' ? parseFloat(conf) : conf;
+          return Math.min(100, Math.max(0, numConf));
+        })
+        .filter((c): c is number => c !== null && !isNaN(c));
+      
+      const avgConfidence = validConfidences.length > 0
+        ? validConfidences.reduce((sum, c) => sum + c, 0) / validConfidences.length
         : 0;
 
-      // Calculate scans by type
+      // Calculate scans by type (include both 'url' and 'link' for URL scans)
       const scansByType = {
-        email: scans.filter(s => s.scan_type === 'email').length,
-        sms: scans.filter(s => s.scan_type === 'sms').length,
-        url: scans.filter(s => s.scan_type === 'link').length,
-        qr: scans.filter(s => s.scan_type === 'qr').length,
+        email: scans.filter(s => {
+          const scanType = s.scanType || s.scan_type;
+          return scanType === 'email';
+        }).length,
+        sms: scans.filter(s => {
+          const scanType = s.scanType || s.scan_type;
+          return scanType === 'sms';
+        }).length,
+        url: scans.filter(s => {
+          const scanType = s.scanType || s.scan_type;
+          return scanType === 'url' || scanType === 'link';
+        }).length,
+        qr: scans.filter(s => {
+          const scanType = s.scanType || s.scan_type;
+          return scanType === 'qr';
+        }).length,
       };
 
       // Calculate ML detection rate (phishing detected / total scans)
+      // This represents what percentage of scans detected phishing
       const mlDetectionRate = scans.length > 0
         ? (phishingScans.length / scans.length) * 100
         : 0;
@@ -84,11 +127,12 @@ export default function AdminStats() {
         phishingDetected: phishingScans.length,
         safeScans: scans.length - phishingScans.length,
         todayScans,
-        avgConfidence: Math.round(avgConfidence * 100),
+        avgConfidence: Math.round(avgConfidence), // Already 0-100, just round
         activeModels: 4, // URL, Email, SMS, QR models
         scansByType,
         mlDetectionRate: Math.round(mlDetectionRate),
       });
+      setLastRefresh(new Date());
     } catch (error) {
       console.error('Error loading stats:', error);
     } finally {
@@ -242,6 +286,14 @@ export default function AdminStats() {
 
   return (
     <div className="space-y-6">
+      {/* Refresh Status */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div>Admin Overview Dashboard</div>
+        {lastRefresh && (
+          <div>Last updated: {lastRefresh.toLocaleTimeString()}</div>
+        )}
+      </div>
+
       {/* Main System Stats */}
       <div>
         <h3 className="text-lg font-semibold mb-4">System Overview</h3>

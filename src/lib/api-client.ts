@@ -8,6 +8,8 @@
 import type { ScanType, ScanResult } from '../types'
 
 const ML_SCAN_API_URL = 'https://eky2mdxr--ml-phishing-scan.functions.blink.new'
+const SMS_ML_DETECTOR_URL = 'https://eky2mdxr--sms-ml-detector.functions.blink.new'
+const ANALYZE_PHISHING_URL = 'https://eky2mdxr--analyze-phishing.functions.blink.new'
 
 export interface MLScanRequest {
   content?: string
@@ -21,7 +23,7 @@ export interface MLScanResponse {
   success: boolean
   result: {
     isPhishing: boolean
-    confidenceScore: number
+    confidenceScore: number // Backend returns this, but it's phishing probability (0-100)
     threatLevel: 'safe' | 'suspicious' | 'dangerous'
     indicators: string[]
     analysis: string
@@ -35,6 +37,11 @@ export interface MLScanResponse {
 
 /**
  * Scan content for phishing using backend ML models
+ * 
+ * IMPORTANT: Backend confidenceScore is actually phishing probability (0-100)
+ * We need to convert it to proper confidence and risk score:
+ * - riskScore = phishing probability
+ * - confidence = depends on threat classification
  */
 export async function scanContentML(request: MLScanRequest): Promise<ScanResult> {
   try {
@@ -52,13 +59,33 @@ export async function scanContentML(request: MLScanRequest): Promise<ScanResult>
     }
 
     const data: MLScanResponse = await response.json()
+    
+    // Backend confidenceScore is phishing probability (0-100)
+    const phishingProbability = data.result.confidenceScore
+    const threatLevel = data.result.threatLevel
+    
+    // Calculate proper confidence based on threat classification
+    let confidence: number
+    if (threatLevel === 'safe') {
+      // Safe content: confidence = certainty it's safe (100 - phishing probability)
+      confidence = Math.round(100 - phishingProbability)
+    } else if (threatLevel === 'suspicious' || threatLevel === 'dangerous') {
+      // Dangerous/suspicious: confidence = phishing probability itself
+      confidence = Math.round(phishingProbability)
+    } else {
+      confidence = 50
+    }
+    
+    // Update analysis text to show phishing probability instead of risk score
+    let analysis = data.result.analysis
+    analysis = analysis.replace(/Risk score: \d+\/100/gi, `Phishing probability: ${Math.round(phishingProbability)}%`)
 
     // Convert backend response to ScanResult format
     return {
-      threatLevel: data.result.threatLevel,
-      confidence: data.result.confidenceScore,
+      threatLevel: threatLevel,
+      confidence: confidence,
       indicators: data.result.indicators,
-      analysis: data.result.analysis,
+      analysis: analysis,
       recommendations: data.result.recommendations,
     }
   } catch (error) {
@@ -84,19 +111,61 @@ export async function scanEmail(
 }
 
 /**
- * Scan SMS for phishing
+ * Scan SMS for phishing using backend ML analysis
+ * 
+ * Uses the analyze-phishing endpoint with Bi-LSTM pattern detection
+ * for SMS text analysis. Server-side processing only.
  */
 export async function scanSMS(
   smsContent: string,
   userId?: string,
   saveToHistory = false
 ): Promise<ScanResult> {
-  return scanContentML({
-    content: smsContent,
-    scanType: 'sms',
-    userId,
-    saveToHistory,
-  })
+  console.log('📱 [scanSMS] Starting backend SMS analysis')
+  
+  try {
+    console.log('📱 [scanSMS] Calling analyze-phishing endpoint for SMS detection')
+    const response = await fetch(ANALYZE_PHISHING_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: smsContent,
+        scanType: 'sms',
+        userId,
+        saveToHistory,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.warn('📱 [scanSMS] API returned non-OK status:', response.status, errorData)
+      throw new Error(errorData.error || `SMS analysis failed with status ${response.status}`)
+    }
+
+    const data = await response.json()
+    console.log('📱 [scanSMS] API response:', data)
+
+    if (!data.success || !data.result) {
+      throw new Error('Invalid response from SMS analysis API')
+    }
+
+    const result = data.result
+    const scanResult: ScanResult = {
+      threatLevel: result.threatLevel,
+      confidence: result.confidence,
+      indicators: result.indicators || [],
+      analysis: result.analysis || 'SMS analyzed for phishing patterns',
+      recommendations: result.recommendations || [],
+    }
+
+    console.log('✅ [scanSMS] SMS analysis completed successfully')
+    return scanResult
+  } catch (error) {
+    console.error('❌ [scanSMS] SMS analysis failed:', error)
+    throw error
+  }
 }
 
 /**

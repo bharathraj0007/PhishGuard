@@ -11,8 +11,15 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    strictPort: true,
-    host: true,
-    allowedHosts: true,
+    strictPort: false,
+    host: '0.0.0.0',
+    allowedHosts: ['*'],
+    cors: true,
+    middleware: [],
+  },
+  preview: {
+    port: 3000,
+    host: '0.0.0.0',
+    cors: true,
   }
 });

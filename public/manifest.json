@@ -1,0 +1,48 @@
+{
+  "name": "PhishGuard - AI Phishing Detector",
+  "short_name": "PhishGuard",
+  "description": "Comprehensive web application that detects phishing attempts by analyzing links, emails, SMS messages, and QR codes for suspicious content",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#000000",
+  "theme_color": "#16A34A",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["security", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Check Link",
+      "short_name": "Check Link",
+      "description": "Analyze a link for phishing threats",
+      "url": "/dashboard?tab=url",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

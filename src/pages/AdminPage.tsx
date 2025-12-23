@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Users, Activity, Database, Settings, BarChart, Brain } from 'lucide-react';
@@ -11,6 +11,15 @@ import AdminStats from '@/components/admin/AdminStats';
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('overview');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleTabChange = useCallback((tab: string) => {
+    setActiveTab(tab);
+    // Force refresh of Overview tab when switching to it
+    if (tab === 'overview') {
+      setRefreshKey(prev => prev + 1);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -33,7 +42,7 @@ export default function AdminPage() {
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6 gap-2">
             <TabsTrigger value="overview" className="gap-2">
               <BarChart className="h-4 w-4" />
@@ -62,7 +71,7 @@ export default function AdminPage() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <AdminStats />
+            <AdminStats key={refreshKey} />
           </TabsContent>
 
           <TabsContent value="users" className="space-y-6">

@@ -6,7 +6,8 @@
  */
 
 import { getEmailModel } from './tfidf-email-model'
-import { getSMSModel } from './bilstm-sms-model'
+// SMS model training is DISABLED - SMS uses backend-only inference
+// import { getSMSModel } from './bilstm-sms-model'
 import { getURLCNNModel } from './lightweight-url-cnn'
 import type { ScanType } from '../../types'
 
@@ -108,7 +109,9 @@ export class AutoTrainingService {
           await this.trainEmailModel()
           break
         case 'sms':
-          await this.trainSMSModel()
+          // SMS uses BACKEND-ONLY inference - no frontend training needed
+          // The backend has a pre-trained TensorFlow SavedModel
+          console.log('📱 SMS detection uses backend-only inference - skipping frontend training')
           break
         case 'qr':
           // QR uses URL model
@@ -213,41 +216,17 @@ export class AutoTrainingService {
   }
 
   /**
-   * Train SMS model with minimal synthetic data
+   * SMS training is DISABLED - SMS uses backend-only inference
+   * 
+   * The backend has a pre-trained TensorFlow SavedModel that handles all SMS detection.
+   * No frontend training is needed or allowed for SMS.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async trainSMSModel(): Promise<void> {
-    const model = getSMSModel()
-    
-    // Minimal training data - phishing SMS
-    const smsTexts: string[] = [
-      // Phishing examples
-      'Click now to verify your account! Limited time only.',
-      'Your bank account has been locked. Confirm your password immediately.',
-      'URGENT: Suspicious activity detected. Update payment details now.',
-      'Congratulations! You won $1000. Claim your prize: bit.ly/prize',
-      'Your package delivery failed. Click to reschedule: short.link/delivery',
-      'FREE gift card! Claim now before it expires: click here',
-      'ALERT: Unusual login attempt. Verify identity now.',
-      'Your account will be suspended. Confirm now to keep access.',
-      // Legitimate examples
-      'Your Uber is arriving in 3 minutes. Driver: John M.',
-      'Your verification code is 123456. Do not share with anyone.',
-      'Order confirmed! Your item will arrive tomorrow.',
-      'Welcome to Netflix! Enjoy your free trial.',
-      'Reminder: Doctor appointment tomorrow at 2 PM.',
-      'Your DoorDash order is on the way. Track in app.',
-      'Package delivered. Left at front door.',
-      'Sale starts tomorrow! 20% off all items.',
-    ]
-    
-    const labels: number[] = [
-      // Phishing labels (1)
-      1, 1, 1, 1, 1, 1, 1, 1,
-      // Legitimate labels (0)
-      0, 0, 0, 0, 0, 0, 0, 0,
-    ]
-
-    await model.train(smsTexts, labels, undefined, 0.2)
+    // SMS uses BACKEND-ONLY inference
+    // This method is intentionally empty - no frontend training for SMS
+    console.log('⚠️ trainSMSModel called but SMS uses backend-only inference')
+    console.log('📱 SMS detection is handled by the Deno edge function with pre-trained model')
   }
 
   /**

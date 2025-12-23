@@ -150,28 +150,28 @@ async function decodeQRImage(base64Image: string): Promise<string | null> {
 
 /**
  * Calculate confidence based on threat level and risk score
- * Following academic requirements:
- * - SAFE: confidence = max(90, 100 - riskScore) = 90-100%
- * - SUSPICIOUS: confidence = 60-80% (based on risk score)
- * - DANGEROUS: confidence = riskScore (the phishing probability itself)
  * 
- * Never returns 0% confidence - minimum is 60%
+ * Interpretation:
+ * - riskScore represents the phishing probability (0-100)
+ * - SAFE (riskScore < 50): confidence = 100 - riskScore (confidence in being safe)
+ * - SUSPICIOUS (50-75): confidence = riskScore (confidence in being phishing)
+ * - DANGEROUS (>= 75): confidence = riskScore (confidence in being phishing)
+ * 
+ * This ensures safe content shows high confidence (e.g., 98% for 2% phishing)
+ * and dangerous content shows high confidence in the danger (e.g., 91% for 91% phishing)
  */
 function calculateConfidence(threatLevel: string, riskScore: number): number {
   if (threatLevel === "safe") {
-    // Safe content: high confidence
-    // Formula: max(90, 100 - riskScore)
-    // Example: riskScore=10 → confidence=90, riskScore=5 → confidence=95
-    return Math.max(90, 100 - riskScore);
+    // Safe content: high confidence in being safe
+    // Example: riskScore=2 → confidence=98%, riskScore=10 → confidence=90%
+    return Math.min(100 - riskScore, 99);
   } else if (threatLevel === "suspicious") {
-    // Suspicious content: moderate confidence (60-80%)
-    // Linear mapping from riskScore [30-50) to confidence [60-80]
-    const normalized = Math.min((riskScore - 30) / 20, 1);
-    return Math.round(60 + normalized * 20);
+    // Suspicious content: moderate-high confidence in the threat
+    // Example: riskScore=60 → confidence=60%
+    return Math.min(riskScore, 99);
   } else {
-    // Dangerous content: confidence = riskScore (capped at 99)
-    // The risk score itself becomes the confidence
-    // Example: riskScore=85 → confidence=85%
+    // Dangerous content: high confidence in the threat
+    // Example: riskScore=91 → confidence=91%
     return Math.min(riskScore, 99);
   }
 }
@@ -228,7 +228,7 @@ async function detectEmailPhishing(emailContent: string): Promise<ScanResult> {
   }
 
   const isPhishing = riskScore >= 50;
-  const threatLevel = riskScore >= 50 ? "dangerous" : riskScore >= 30 ? "suspicious" : "safe";
+  const threatLevel = riskScore >= 75 ? "dangerous" : riskScore >= 50 ? "suspicious" : "safe";
   const confidenceScore = calculateConfidence(threatLevel, riskScore);
 
   return {
@@ -236,7 +236,7 @@ async function detectEmailPhishing(emailContent: string): Promise<ScanResult> {
     confidenceScore,
     threatLevel,
     indicators: indicators.length > 0 ? indicators : ["No obvious phishing indicators"],
-    analysis: `Email analyzed using NLP pattern matching. Risk score: ${riskScore}/100. ${
+    analysis: `Email analyzed using NLP pattern matching. Phishing probability: ${riskScore}%. ${
       isPhishing ? "Multiple phishing indicators detected." : "Email appears legitimate."
     }`,
     recommendations: isPhishing
@@ -297,7 +297,7 @@ async function detectSMSPhishing(smsContent: string): Promise<ScanResult> {
   }
 
   const isPhishing = riskScore >= 50;
-  const threatLevel = riskScore >= 50 ? "dangerous" : riskScore >= 30 ? "suspicious" : "safe";
+  const threatLevel = riskScore >= 75 ? "dangerous" : riskScore >= 50 ? "suspicious" : "safe";
   const confidenceScore = calculateConfidence(threatLevel, riskScore);
 
   return {
@@ -305,7 +305,7 @@ async function detectSMSPhishing(smsContent: string): Promise<ScanResult> {
     confidenceScore,
     threatLevel,
     indicators: indicators.length > 0 ? indicators : ["No obvious phishing patterns"],
-    analysis: `SMS analyzed using Bi-LSTM text classification. Risk score: ${riskScore}/100. ${
+    analysis: `SMS analyzed using Bi-LSTM text classification. Phishing probability: ${riskScore}%. ${
       isPhishing ? "High phishing probability detected." : "SMS appears legitimate."
     }`,
     recommendations: isPhishing
@@ -366,7 +366,7 @@ async function detectURLPhishing(url: string): Promise<ScanResult> {
   }
 
   const isPhishing = riskScore >= 50;
-  const threatLevel = riskScore >= 50 ? "dangerous" : riskScore >= 30 ? "suspicious" : "safe";
+  const threatLevel = riskScore >= 75 ? "dangerous" : riskScore >= 50 ? "suspicious" : "safe";
   const confidenceScore = calculateConfidence(threatLevel, riskScore);
 
   return {
@@ -374,7 +374,7 @@ async function detectURLPhishing(url: string): Promise<ScanResult> {
     confidenceScore,
     threatLevel,
     indicators: indicators.length > 0 ? indicators : ["No obvious phishing patterns"],
-    analysis: `URL analyzed using Character-CNN model. Risk score: ${riskScore}/100. ${
+    analysis: `URL analyzed using Character-CNN model. Phishing probability: ${riskScore}%. ${
       isPhishing ? "Multiple high-risk indicators detected." : "URL appears legitimate."
     }`,
     recommendations: isPhishing

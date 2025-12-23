@@ -35,7 +35,7 @@ function App() {
         
         <footer className="border-t py-8 bg-muted/30">
           <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-            <p>© 2024 PhishGuard. Protecting you from phishing threats with AI-powered detection.</p>
+            <p>© 2025 PhishGuard. Protecting you from phishing threats with AI-powered detection.</p>
           </div>
         </footer>
       </div>

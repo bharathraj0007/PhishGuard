@@ -45,7 +45,7 @@ export default function ModelTrainingManager() {
     sms: {
       status: "idle",
       progress: 0,
-      message: "Ready to train SMS model",
+      message: "⚠️ SMS uses backend-only inference (no frontend training)",
     },
     email: {
       status: "idle",
@@ -57,6 +57,12 @@ export default function ModelTrainingManager() {
   const [autoTrain, setAutoTrain] = useState(false);
 
   const importDataset = async (scanType: "url" | "sms" | "email") => {
+    // SMS training is DISABLED - uses backend-only inference
+    if (scanType === "sms") {
+      toast.error("SMS training is disabled. SMS detection uses backend-only inference with a pre-trained TensorFlow CNN model.");
+      return;
+    }
+
     try {
       setTrainingStatus((prev) => ({
         ...prev,
@@ -119,6 +125,12 @@ export default function ModelTrainingManager() {
   };
 
   const trainModel = async (scanType: "url" | "sms" | "email") => {
+    // SMS training is DISABLED - uses backend-only inference
+    if (scanType === "sms") {
+      toast.error("SMS training is disabled. SMS detection uses backend-only inference with a pre-trained TensorFlow CNN model.");
+      return;
+    }
+
     try {
       setTrainingStatus((prev) => ({
         ...prev,

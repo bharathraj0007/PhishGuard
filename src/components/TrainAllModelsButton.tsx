@@ -25,7 +25,9 @@ export function TrainAllModelsButton() {
     qr: { status: 'idle', progress: null, metrics: null, error: null }
   });
 
-  const scanTypes: ScanType[] = ['url', 'email', 'sms', 'qr'];
+  // SMS training is DISABLED - uses backend-only inference
+  const scanTypes: ScanType[] = ['url', 'email', 'qr'];
+  const allScanTypes: ScanType[] = ['url', 'email', 'sms', 'qr'];
   const modelNames = {
     url: 'URL Phishing',
     email: 'Email Phishing',
@@ -174,18 +176,38 @@ export function TrainAllModelsButton() {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* SMS Backend-Only Notice */}
+        <Alert className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
+          <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+          <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+            <strong>SMS Detection:</strong> Uses backend-only inference with a pre-trained TensorFlow CNN model. Frontend training is disabled.
+          </AlertDescription>
+        </Alert>
+
         {/* Model Status Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {scanTypes.map(scanType => {
+          {allScanTypes.map(scanType => {
             const modelStatus = modelStatuses[scanType];
+            // SMS uses backend-only inference - show disabled state
+            const isSMSDisabled = scanType === 'sms';
+
             return (
-              <Card key={scanType} className="relative">
+              <Card key={scanType} className={`relative ${isSMSDisabled ? 'opacity-75' : ''}`}>
+                {isSMSDisabled && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/40 dark:bg-black/40 rounded-lg z-10 pointer-events-none">
+                    <Badge className="bg-yellow-500 text-yellow-900">Backend Only</Badge>
+                  </div>
+                )}
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">{modelNames[scanType]}</CardTitle>
                     <div className="flex items-center gap-2">
-                      {getStatusIcon(modelStatus.status)}
-                      {getStatusBadge(modelStatus.status)}
+                      {!isSMSDisabled && getStatusIcon(modelStatus.status)}
+                      {isSMSDisabled ? (
+                        <Badge className="bg-gray-400">Disabled</Badge>
+                      ) : (
+                        getStatusBadge(modelStatus.status)
+                      )}
                     </div>
                   </div>
                 </CardHeader>
