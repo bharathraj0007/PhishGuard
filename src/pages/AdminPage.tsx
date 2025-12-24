@@ -1,12 +1,10 @@
 import { useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Shield, Users, Activity, Database, Settings, BarChart, Brain } from 'lucide-react';
+import { Shield, Users, Activity, Database, BarChart } from 'lucide-react';
 import UserManagement from '@/components/admin/UserManagement';
 import ScanMonitoring from '@/components/admin/ScanMonitoring';
-import SystemSettings from '@/components/admin/SystemSettings';
 import DatasetManagement from '@/components/admin/DatasetManagement';
-import ModelManagement from '@/components/admin/ModelManagement';
 import AdminStats from '@/components/admin/AdminStats';
 
 export default function AdminPage() {
@@ -33,7 +31,7 @@ export default function AdminPage() {
             <div>
               <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
               <p className="text-sm text-muted-foreground">
-                Manage users, monitor scans, and configure system settings
+                Manage users, monitor scans, and manage datasets
               </p>
             </div>
           </div>
@@ -43,7 +41,7 @@ export default function AdminPage() {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6 gap-2">
+          <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4 gap-2">
             <TabsTrigger value="overview" className="gap-2">
               <BarChart className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -59,14 +57,6 @@ export default function AdminPage() {
             <TabsTrigger value="datasets" className="gap-2">
               <Database className="h-4 w-4" />
               <span className="hidden sm:inline">Datasets</span>
-            </TabsTrigger>
-            <TabsTrigger value="models" className="gap-2">
-              <Brain className="h-4 w-4" />
-              <span className="hidden sm:inline">ML Training</span>
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-2">
-              <Settings className="h-4 w-4" />
-              <span className="hidden sm:inline">Settings</span>
             </TabsTrigger>
           </TabsList>
 
@@ -84,14 +74,6 @@ export default function AdminPage() {
 
           <TabsContent value="datasets" className="space-y-6">
             <DatasetManagement />
-          </TabsContent>
-
-          <TabsContent value="models" className="space-y-6">
-            <ModelManagement />
-          </TabsContent>
-
-          <TabsContent value="settings" className="space-y-6">
-            <SystemSettings />
           </TabsContent>
         </Tabs>
       </div>

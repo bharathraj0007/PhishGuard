@@ -24,8 +24,13 @@ function errorResponse(message: string, status = 500) {
 }
 // ═══════════════════════════════════════════════════════════════════
 
+// Initialize Blink client with secret key for server-side access
+const projectId = Deno.env.get("BLINK_PROJECT_ID") || "phishguard-web-phishing-detector-eky2mdxr";
+const secretKey = Deno.env.get("BLINK_SECRET_KEY");
+
 const blink = createClient({
-  projectId: "phishguard-web-phishing-detector-eky2mdxr",
+  projectId,
+  secretKey,
 });
 
 async function handler(req: Request): Promise<Response> {
